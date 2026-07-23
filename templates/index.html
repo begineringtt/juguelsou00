@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지출결의서 자동 생성기</title>
+<style>
+  :root {
+    --border: #d0d5dd;
+    --accent: #2f6f4f;
+    --bg: #f7f8fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "맑은 고딕", "Malgun Gothic", sans-serif;
+    background: var(--bg);
+    margin: 0;
+    padding: 24px;
+    color: #1c1f24;
+  }
+  .card {
+    max-width: 1040px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 32px;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  p.sub {
+    color: #667085;
+    margin: 0 0 24px;
+    font-size: 13px;
+  }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 20px;
+    padding: 16px 18px 18px;
+  }
+  legend {
+    font-weight: bold;
+    font-size: 13px;
+    color: var(--accent);
+    padding: 0 6px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+  }
+  .grid.full { grid-template-columns: 1fr; }
+  label {
+    display: block;
+    font-size: 12.5px;
+    color: #344054;
+    margin-bottom: 4px;
+  }
+  input[type=text], input[type=date], input[type=number], select, textarea {
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13.5px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 44px; }
+  .row-with-select { display: flex; gap: 6px; align-items: flex-start; }
+  .row-with-select > *:first-child { flex: 1; }
+  .row-with-select select { width: auto; flex: none; max-width: 130px; font-size: 12px; }
+  .preset-row { margin-bottom: 12px; }
+  .preset-row select { font-size: 13.5px; }
+  .col-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #344054;
+  }
+  .col-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 13px; }
+  .col-toggles .hint { color: #98a2b3; font-size: 11.5px; }
+  table#itemsTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table#itemsTable th, table#itemsTable td {
+    border: 1px solid var(--border);
+    padding: 6px;
+    text-align: center;
+  }
+  table#itemsTable th {
+    background: #f0f2f5;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  table#itemsTable input { border: none; padding: 4px; text-align: center; width: 100%; }
+  table#itemsTable input:focus { outline: 1px solid var(--accent); }
+  .row-buttons { margin-top: 10px; display: flex; gap: 8px; }
+  button {
+    cursor: pointer;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #fff;
+    padding: 7px 14px;
+    font-size: 13px;
+  }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  button.primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    font-size: 15px;
+    padding: 12px 20px;
+    width: 100%;
+    margin-top: 8px;
+  }
+  button.primary:hover { opacity: 0.92; }
+  .totals {
+    text-align: right;
+    margin-top: 10px;
+    font-size: 13.5px;
+    color: #344054;
+  }
+  .totals b { color: var(--accent); font-size: 16px; }
+  #msg { color: #b42318; font-size: 13px; margin-top: 6px; min-height: 18px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>지출결의서 자동 생성기</h1>
+  <p class="sub">아래 내용을 입력하고 '엑셀 파일 생성' 버튼을 누르면, 회사 양식(지출결의서) 그대로 채워진 .xlsx 파일이 다운로드됩니다. 한 번 사용한 값은 자동으로 기억되어 다음에 드롭다운으로 다시 고를 수 있습니다.</p>
+
+  <form id="reportForm">
+    <fieldset>
+      <legend>기본 정보</legend>
+      <div class="grid">
+        <div>
+          <label>업체명 *</label>
+          <input type="text" name="company" list="companyList" required placeholder="예) 주식회사 다임">
+          <datalist id="companyList">
+            {% for v in history.company %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+        </div>
+        <div>
+          <label>문서번호 (선택, 보통 경리부서 기재란)</label>
+          <input type="text" name="doc_number" placeholder="비워두면 공란">
+        </div>
+        <div>
+          <label>발의일</label>
+          <input type="date" name="propose_date" id="proposeDate">
+        </div>
+        <div>
+          <label>지출일</label>
+          <input type="date" name="spend_date" id="spendDate">
+        </div>
+        <div>
+          <label>청구부서</label>
+          <input type="text" name="department" list="departmentList" value="그린연구소">
+          <datalist id="departmentList">
+            {% for v in history.department %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+        </div>
+        <div>
+          <label>청구인</label>
+          <input type="text" name="requester" list="requesterList" placeholder="예) 이배훈 책임연구원">
+          <datalist id="requesterList">
+            {% for v in history.requester %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>내용</legend>
+      <div class="grid full">
+        <div>
+          <label>내용 (제목) *</label>
+          <input type="text" name="title" list="titleList" required placeholder="예) 자동화 과제 자재 구매의 건">
+          <datalist id="titleList">
+            {% for v in history.title %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+        </div>
+        <div>
+          <div class="row-with-select">
+            <label style="flex:none;width:100%">상세내용
+              <textarea name="detail" id="detailText">해당 연구개발 과제 수행을 위한 자재를 구매 하오니 결재 승인 요청드립니다.</textarea>
+            </label>
+          </div>
+          <div class="row-with-select" style="margin-top:6px;">
+            <span></span>
+            <select id="detailPreset" onchange="if(this.value) document.getElementById('detailText').value=this.value;">
+              <option value="">이전 상세내용 불러오기...</option>
+              {% for v in history.detail %}<option value="{{ v }}">{{ v[:30] }}{{ '...' if v|length > 30 else '' }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>과제 정보 (해당 없으면 비워두세요)</legend>
+      <div class="preset-row">
+        <label>과제 선택 (자동으로 아래 3칸을 채워줍니다)</label>
+        <select id="projectPreset">
+          <option value="">직접 입력</option>
+          {% for p in projects %}
+          <option value="{{ loop.index0 }}">{{ p.project_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="grid">
+        <div>
+          <label>중앙행정기관</label>
+          <input type="text" name="agency" id="agencyInput" list="agencyList" placeholder="예) 농림축산식품부">
+          <datalist id="agencyList">
+            {% for v in projects|map(attribute='agency')|unique %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+        </div>
+        <div>
+          <label>전문기관</label>
+          <input type="text" name="org" id="orgInput" list="orgList" placeholder="예) 농림식품기술기획평가원">
+          <datalist id="orgList">
+            {% for v in projects|map(attribute='org')|unique %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+        </div>
+      </div>
+      <div class="grid full" style="margin-top:12px;">
+        <div>
+          <label>과제명</label>
+          <input type="text" name="project_name" id="projectNameInput" list="projectNameList" placeholder="예) 고효율 광원 및 지능형 광조절 시스템 탑재 모듈형 수직농장 모델 개발">
+          <datalist id="projectNameList">
+            {% for p in projects %}<option value="{{ p.project_name }}">{% endfor %}
+          </datalist>
+        </div>
+        <div>
+          <label>집행 문구</label>
+          <input type="text" name="execution_note" list="executionNoteList" value="연구재료비 집행의 건 (연구개발계획서 상 계상되어 있는 건임)">
+          <datalist id="executionNoteList">
+            {% for v in history.execution_note %}<option value="{{ v }}">{% endfor %}
+          </datalist>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>품목</legend>
+      <div class="col-toggles">
+        <label><input type="checkbox" id="colSpec" name="use_spec" checked> 규격</label>
+        <label><input type="checkbox" id="colUnit" name="use_unit" checked> 단위</label>
+        <label><input type="checkbox" id="colQty" name="use_qty" checked> 수량</label>
+        <label><input type="checkbox" id="colPrice" name="use_price" checked> 단가 <span class="hint">(해제하면 공급가를 직접 입력합니다)</span></label>
+      </div>
+      <table id="itemsTable">
+        <thead>
+          <tr>
+            <th style="width:22%">품목</th>
+            <th data-col="spec" style="width:20%">규격</th>
+            <th data-col="unit" style="width:9%">단위</th>
+            <th data-col="qty" style="width:10%">수량</th>
+            <th data-col="price" style="width:14%">단가</th>
+            <th style="width:14%">공급가</th>
+            <th style="width:5%"></th>
+          </tr>
+        </thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+      <div class="row-buttons">
+        <button type="button" class="small" id="addRowBtn">+ 품목 추가</button>
+      </div>
+      <div class="totals">
+        공급가 합계: <span id="sumSupply">0</span>원 &nbsp;|&nbsp;
+        부가세 합계: <span id="sumVat">0</span>원 &nbsp;|&nbsp;
+        <b>총 합계: <span id="sumTotal">0</span>원</b>
+      </div>
+    </fieldset>
+
+    <button type="submit" class="primary">엑셀 파일 생성</button>
+    <div id="msg"></div>
+  </form>
+</div>
+
+<script>
+const PROJECTS = {{ projects | tojson }};
+const itemsBody = document.getElementById('itemsBody');
+const colSpec = document.getElementById('colSpec');
+const colUnit = document.getElementById('colUnit');
+const colQty = document.getElementById('colQty');
+const colPrice = document.getElementById('colPrice');
+
+function todayStr() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+document.getElementById('proposeDate').value = todayStr();
+document.getElementById('spendDate').value = todayStr();
+
+document.getElementById('projectPreset').addEventListener('change', (e) => {
+  if (e.target.value === '') return;
+  const p = PROJECTS[parseInt(e.target.value, 10)];
+  document.getElementById('agencyInput').value = p.agency;
+  document.getElementById('orgInput').value = p.org;
+  document.getElementById('projectNameInput').value = p.project_name;
+});
+
+function addRow(prefill) {
+  prefill = prefill || {};
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="f-name" value="${prefill.name||''}"></td>
+    <td data-col="spec"><input type="text" class="f-spec" value="${prefill.spec||''}"></td>
+    <td data-col="unit"><input type="text" class="f-unit" value="${prefill.unit||'EA'}"></td>
+    <td data-col="qty"><input type="number" class="f-qty" value="${prefill.qty||1}" min="0" step="any"></td>
+    <td data-col="price"><input type="number" class="f-price" value="${prefill.price||0}" min="0" step="any"></td>
+    <td>
+      <span class="f-supply-calc">0</span>
+      <input type="number" class="f-supply-input" value="0" min="0" step="any" style="display:none">
+    </td>
+    <td><button type="button" class="small removeRowBtn">삭제</button></td>
+  `;
+  itemsBody.appendChild(tr);
+  tr.querySelectorAll('.f-qty, .f-price, .f-supply-input').forEach(el => el.addEventListener('input', recalc));
+  tr.querySelector('.removeRowBtn').addEventListener('click', () => { tr.remove(); recalc(); });
+  applyColumnVisibility();
+}
+
+function applyColumnVisibility() {
+  const show = { spec: colSpec.checked, unit: colUnit.checked, qty: colQty.checked, price: colPrice.checked };
+  document.querySelectorAll('[data-col]').forEach(el => {
+    el.style.display = show[el.dataset.col] ? '' : 'none';
+  });
+  document.querySelectorAll('#itemsBody tr').forEach(tr => {
+    const calc = tr.querySelector('.f-supply-calc');
+    const inp = tr.querySelector('.f-supply-input');
+    if (show.price) { calc.style.display = ''; inp.style.display = 'none'; }
+    else { calc.style.display = 'none'; inp.style.display = ''; }
+  });
+  recalc();
+}
+[colSpec, colUnit, colQty, colPrice].forEach(cb => cb.addEventListener('change', applyColumnVisibility));
+
+function recalc() {
+  let sumSupply = 0, sumVat = 0;
+  const usePrice = colPrice.checked;
+  const useQty = colQty.checked;
+  itemsBody.querySelectorAll('tr').forEach(tr => {
+    let supply;
+    if (usePrice) {
+      const price = parseFloat(tr.querySelector('.f-price').value) || 0;
+      const qty = useQty ? (parseFloat(tr.querySelector('.f-qty').value) || 0) : 1;
+      supply = qty * price;
+      tr.querySelector('.f-supply-calc').textContent = supply.toLocaleString();
+    } else {
+      supply = parseFloat(tr.querySelector('.f-supply-input').value) || 0;
+    }
+    sumSupply += supply;
+    sumVat += supply / 10;
+  });
+  document.getElementById('sumSupply').textContent = sumSupply.toLocaleString();
+  document.getElementById('sumVat').textContent = sumVat.toLocaleString();
+  document.getElementById('sumTotal').textContent = (sumSupply + sumVat).toLocaleString();
+}
+
+document.getElementById('addRowBtn').addEventListener('click', () => addRow());
+addRow();
+
+document.getElementById('reportForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('msg');
+  msg.style.color = '#b42318';
+  msg.textContent = '';
+
+  const rows = [...itemsBody.querySelectorAll('tr')];
+  if (rows.length === 0 || ![...rows].some(tr => tr.querySelector('.f-name').value.trim())) {
+    msg.textContent = '품목을 1개 이상 입력해주세요.';
+    return;
+  }
+
+  const fd = new FormData(e.target);
+  rows.forEach(tr => {
+    fd.append('item_name[]', tr.querySelector('.f-name').value);
+    fd.append('item_spec[]', tr.querySelector('.f-spec').value);
+    fd.append('item_unit[]', tr.querySelector('.f-unit').value);
+    fd.append('item_qty[]', tr.querySelector('.f-qty').value);
+    fd.append('item_price[]', tr.querySelector('.f-price').value);
+    fd.append('item_supply[]', tr.querySelector('.f-supply-input').value);
+  });
+
+  try {
+    const res = await fetch('/generate', { method: 'POST', body: fd });
+    if (!res.ok) {
+      msg.textContent = await res.text();
+      return;
+    }
+    const blob = await res.blob();
+    let filename = 'expense_report.xlsx';
+    const disp = res.headers.get('Content-Disposition');
+    if (disp) {
+      const m = disp.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/);
+      if (m) filename = decodeURIComponent(m[1]);
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    msg.style.color = '#2f6f4f';
+    msg.textContent = `생성 완료: ${filename} (다음에 열면 방금 입력한 값들이 드롭다운에 남아있습니다)`;
+  } catch (err) {
+    msg.textContent = '오류가 발생했습니다: ' + err.message;
+  }
+});
+</script>
+</body>
+</html>
