@@ -1,7 +1,7 @@
 import openpyxl
 from openpyxl.utils import get_column_letter
 
-from generator import ITEM_HEADER_ROW, TABLE_START_COL, TABLE_END_COL, _compute_column_layout
+from generator import ITEM_HEADER_ROW, TABLE_START_COL, TABLE_END_COL, FIRST_ITEM_ROW, _compute_column_layout
 from generator import build_expense_report
 
 BASE_DATA = {
@@ -114,9 +114,28 @@ def test_supply_direct_entry_when_price_off():
     print("OK: test_supply_direct_entry_when_price_off")
 
 
+def test_qty_price_supply_cells_populated():
+    data = dict(BASE_DATA)
+    data["items"] = [{"name": "품목1", "spec": "규격1", "unit": "EA", "qty": 2, "price": 1000}]
+    buf = build_expense_report(data)
+    wb = openpyxl.load_workbook(buf)
+    ws = wb.worksheets[0]
+
+    layout = _compute_column_layout({"use_spec": True, "use_unit": True, "use_qty": True, "use_price": True})
+    qty_letter = get_column_letter(layout["qty"][0])
+    price_letter = get_column_letter(layout["price"][0])
+    supply_letter = get_column_letter(layout["supply"][0])
+
+    assert ws[f"{qty_letter}{FIRST_ITEM_ROW}"].value == 2
+    assert ws[f"{price_letter}{FIRST_ITEM_ROW}"].value == 1000
+    assert ws[f"{supply_letter}{FIRST_ITEM_ROW}"].value == f"={qty_letter}{FIRST_ITEM_ROW}*{price_letter}{FIRST_ITEM_ROW}"
+    print("OK: test_qty_price_supply_cells_populated")
+
+
 if __name__ == "__main__":
     test_all_columns_regression()
     test_spec_dropped_compacts_header()
     test_total_row_boundary_matches_supply_start()
     test_supply_direct_entry_when_price_off()
+    test_qty_price_supply_cells_populated()
     print("ALL PASSED")

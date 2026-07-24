@@ -182,6 +182,8 @@ def _rebuild_item_section(ws, items):
 
         use_qty = "qty" in layout and item.get("qty") is not None
         use_price = "price" in layout and item.get("price") is not None
+        if use_qty:
+            ws[f"{_col_letter(layout, 'qty')}{row}"] = item["qty"]
         if use_price:
             price_letter = _col_letter(layout, "price")
             ws[f"{price_letter}{row}"] = item["price"]
