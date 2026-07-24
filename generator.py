@@ -84,20 +84,6 @@ def _compute_column_layout(flags):
     return layout
 
 
-# Backward compatibility for existing code (Task 6 will replace this usage)
-_default_layout = _compute_column_layout({
-    "use_spec": True,
-    "use_unit": True,
-    "use_qty": True,
-    "use_price": True,
-})
-ITEM_COL_MERGES = [
-    (get_column_letter(start), get_column_letter(end))
-    for key in ["name", "spec", "unit", "qty", "price", "supply", "vat"]
-    for start, end, _ in [_default_layout[key]]
-]
-
-
 def _capture_row_style(ws, row):
     styles = []
     for col in range(1, MAX_STYLE_COL + 1):
@@ -129,13 +115,37 @@ def _apply_row_style(ws, row, row_style):
     ws.row_dimensions[row].height = row_style["height"]
 
 
-def _add_item_row_merges(ws, row):
-    for start_col, end_col in ITEM_COL_MERGES:
-        ws.merge_cells(f"{start_col}{row}:{end_col}{row}")
+def _add_item_row_merges(ws, row, layout):
+    for start, end, _label in layout.values():
+        if end > start:
+            ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
+
+
+def _col_letter(layout, key):
+    return get_column_letter(layout[key][0])
+
+
+def _rebuild_header_row(ws, layout):
+    stale_merges = [
+        m for m in list(ws.merged_cells.ranges)
+        if m.min_row == ITEM_HEADER_ROW and m.max_row == ITEM_HEADER_ROW
+        and m.min_col >= TABLE_START_COL and m.max_col <= TABLE_END_COL
+    ]
+    for m in stale_merges:
+        ws.unmerge_cells(str(m))
+
+    for col in range(TABLE_START_COL, TABLE_END_COL + 1):
+        ws.cell(row=ITEM_HEADER_ROW, column=col).value = None
+
+    for start, end, label in layout.values():
+        if end > start:
+            ws.merge_cells(start_row=ITEM_HEADER_ROW, start_column=start,
+                            end_row=ITEM_HEADER_ROW, end_column=end)
+        ws.cell(row=ITEM_HEADER_ROW, column=start).value = label
 
 
 def _rebuild_item_section(ws, items):
-    """품목 표 이하(품목 행들 ~ 하단 각주)를 완전히 새로 그린다.
+    """품목 표 이하(헤더 행 ~ 하단 각주)를 완전히 새로 그린다.
 
     반환값: total_row (합계 금액 행 번호)
     """
@@ -154,27 +164,36 @@ def _rebuild_item_section(ws, items):
             ws.unmerge_cells(str(mc))
     ws.delete_rows(FIRST_ITEM_ROW, OLD_LAST_ROW - FIRST_ITEM_ROW + 1)
 
+    # 2.5) 활성 필드에 맞춰 헤더 행의 컬럼 폭을 재계산
+    flags = _infer_flags(items)
+    layout = _compute_column_layout(flags)
+    _rebuild_header_row(ws, layout)
+    supply_letter = _col_letter(layout, "supply")
+
     # 3) 필요한 행 수만큼 새로 채워 넣기
     row = FIRST_ITEM_ROW
     for item in items:
         _apply_row_style(ws, row, style_item)
-        ws[f"C{row}"] = item["name"]
-        if item.get("spec"):
-            ws[f"G{row}"] = item["spec"]
-        if item.get("unit"):
-            ws[f"J{row}"] = item["unit"]
+        ws[f"{_col_letter(layout, 'name')}{row}"] = item["name"]
+        if "spec" in layout and item.get("spec"):
+            ws[f"{_col_letter(layout, 'spec')}{row}"] = item["spec"]
+        if "unit" in layout and item.get("unit"):
+            ws[f"{_col_letter(layout, 'unit')}{row}"] = item["unit"]
 
-        use_qty = item.get("qty") is not None
-        use_price = item.get("price") is not None
-        if use_qty:
-            ws[f"L{row}"] = item["qty"]
+        use_qty = "qty" in layout and item.get("qty") is not None
+        use_price = "price" in layout and item.get("price") is not None
         if use_price:
-            ws[f"N{row}"] = item["price"]
-            ws[f"Q{row}"] = f"=L{row}*N{row}" if use_qty else f"=N{row}"
+            price_letter = _col_letter(layout, "price")
+            ws[f"{price_letter}{row}"] = item["price"]
+            if use_qty:
+                qty_letter = _col_letter(layout, "qty")
+                ws[f"{supply_letter}{row}"] = f"={qty_letter}{row}*{price_letter}{row}"
+            else:
+                ws[f"{supply_letter}{row}"] = f"={price_letter}{row}"
         else:
-            ws[f"Q{row}"] = item.get("supply", 0)
-        ws[f"T{row}"] = f"=Q{row}/10"
-        _add_item_row_merges(ws, row)
+            ws[f"{supply_letter}{row}"] = item.get("supply", 0)
+        ws[f"{_col_letter(layout, 'vat')}{row}"] = f"={supply_letter}{row}/10"
+        _add_item_row_merges(ws, row, layout)
         row += 1
 
     blank_row = row
@@ -186,9 +205,10 @@ def _rebuild_item_section(ws, items):
     total_row = row
     _apply_row_style(ws, total_row, style_total)
     ws[f"C{total_row}"] = "합계 금액"
-    ws[f"Q{total_row}"] = f"=SUM(Q{FIRST_ITEM_ROW}:V{blank_row})"
-    ws.merge_cells(f"C{total_row}:P{total_row}")
-    ws.merge_cells(f"Q{total_row}:V{total_row}")
+    ws[f"{supply_letter}{total_row}"] = f"=SUM({supply_letter}{FIRST_ITEM_ROW}:V{blank_row})"
+    label_end_letter = get_column_letter(layout["supply"][0] - 1)
+    ws.merge_cells(f"C{total_row}:{label_end_letter}{total_row}")
+    ws.merge_cells(f"{supply_letter}{total_row}:V{total_row}")
     row += 1
 
     gap1_row = row
@@ -211,7 +231,7 @@ def _rebuild_item_section(ws, items):
     ws.merge_cells(f"A{footer_row}:M{footer_row}")
     ws.merge_cells(f"N{footer_row}:Z{footer_row}")
 
-    ws["S8"] = f"=Q{total_row}"
+    ws["S8"] = f"={supply_letter}{total_row}"
 
     return total_row
 
