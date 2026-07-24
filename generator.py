@@ -15,6 +15,7 @@ import io
 import os
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PATH = os.path.join(BASE_DIR, "template_files", "base_template.xlsx")
@@ -35,14 +36,65 @@ REF_GAP3_ROW = 30
 REF_FOOTER_ROW = 31
 OLD_LAST_ROW = 31
 
+TABLE_START_COL = 3   # C
+TABLE_END_COL = 22    # V
+TABLE_WIDTH = TABLE_END_COL - TABLE_START_COL + 1  # 20
+
+ITEM_FIELDS = [
+    ("name", "품목", 4, None),
+    ("spec", "규격", 3, "use_spec"),
+    ("unit", "단위", 2, "use_unit"),
+    ("qty", "수량", 2, "use_qty"),
+    ("price", "단가", 3, "use_price"),
+    ("supply", "공급가", 3, None),
+    ("vat", "부가세", 3, None),
+]
+
+
+def _largest_remainder_allocation(weights, total):
+    weight_sum = sum(weights)
+    raw = [w / weight_sum * total for w in weights]
+    floors = [int(x) for x in raw]
+    remainder = total - sum(floors)
+    order = sorted(range(len(weights)), key=lambda i: raw[i] - floors[i], reverse=True)
+    for i in order[:remainder]:
+        floors[i] += 1
+    return floors
+
+
+def _infer_flags(items):
+    return {
+        "use_spec": any("spec" in item for item in items),
+        "use_unit": any("unit" in item for item in items),
+        "use_qty": any("qty" in item for item in items),
+        "use_price": any("price" in item for item in items),
+    }
+
+
+def _compute_column_layout(flags):
+    active = [f for f in ITEM_FIELDS if f[3] is None or flags.get(f[3])]
+    weights = [f[2] for f in active]
+    spans = _largest_remainder_allocation(weights, TABLE_WIDTH)
+
+    layout = {}
+    col = TABLE_START_COL
+    for (key, label, _weight, _flag), span in zip(active, spans):
+        layout[key] = (col, col + span - 1, label)
+        col += span
+    return layout
+
+
+# Backward compatibility for existing code (Task 6 will replace this usage)
+_default_layout = _compute_column_layout({
+    "use_spec": True,
+    "use_unit": True,
+    "use_qty": True,
+    "use_price": True,
+})
 ITEM_COL_MERGES = [
-    ("C", "F"),  # 품목
-    ("G", "I"),  # 규격
-    ("J", "K"),  # 단위
-    ("L", "M"),  # 수량
-    ("N", "P"),  # 단가
-    ("Q", "S"),  # 공급가
-    ("T", "V"),  # 부가세
+    (get_column_letter(start), get_column_letter(end))
+    for key in ["name", "spec", "unit", "qty", "price", "supply", "vat"]
+    for start, end, _ in [_default_layout[key]]
 ]
 
 
