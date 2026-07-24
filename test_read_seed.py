@@ -237,7 +237,26 @@ def test_scan_sheet_exception_does_not_abort_workbook():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def test_seal_placeholder_is_not_treated_as_requester():
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A11"] = "지출일"
+        ws["N11"] = "청 구 인"
+        ws["AC11"] = "(인)"
+        wb.save(os.path.join(tmp_dir, "seal_only.xlsx"))
+
+        result = scan_read_folder(tmp_dir)
+
+        assert result["history"]["requester"] == []
+        print("OK: test_seal_placeholder_is_not_treated_as_requester")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_scan_read_folder()
     test_scan_sheet_exception_does_not_abort_workbook()
+    test_seal_placeholder_is_not_treated_as_requester()
     print("ALL PASSED")

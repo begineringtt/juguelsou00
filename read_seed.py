@@ -41,10 +41,13 @@ def _cell_text(ws, row, col):
     return str(value).strip()
 
 
+SEAL_PLACEHOLDERS = {"(인)", "(사인)", "(서명)"}
+
+
 def _first_value_after(ws, row, start_col):
     for col in range(start_col + 1, MAX_SCAN_COL + 10):
         text = _cell_text(ws, row, col)
-        if text:
+        if text and text not in SEAL_PLACEHOLDERS:
             return text
     return ""
 
