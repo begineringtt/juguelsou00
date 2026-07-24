@@ -95,3 +95,31 @@ def record_generation(data):
             },
         )
         _save_json(PROJECTS_PATH, projects[:MAX_PROJECTS])
+
+
+def merge_read_seed(seed):
+    """read_seed.scan_read_folder()의 결과를 기존 이력/과제 프리셋에 중복 없이 병합한다."""
+    hist = load_history()
+    added_history = 0
+    for field in HISTORY_FIELDS:
+        new_values = seed.get("history", {}).get(field, [])
+        existing = set(hist.get(field, []))
+        for value in new_values:
+            if value not in existing:
+                hist.setdefault(field, []).append(value)
+                existing.add(value)
+                added_history += 1
+    _save_json(HISTORY_PATH, hist)
+
+    projects = load_projects()
+    existing_names = {p.get("project_name") for p in projects}
+    added_projects = 0
+    for p in seed.get("projects", []):
+        name = p.get("project_name")
+        if name and name not in existing_names:
+            projects.append(p)
+            existing_names.add(name)
+            added_projects += 1
+    _save_json(PROJECTS_PATH, projects)
+
+    return {"history_added": added_history, "projects_added": added_projects}
