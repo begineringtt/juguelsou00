@@ -1,9 +1,10 @@
 import threading
 import webbrowser
 
-from flask import Flask, render_template, request, send_file
+from flask import Flask, redirect, render_template, request, send_file, url_for
 
 import history_store
+import read_seed
 from generator import build_expense_report, suggest_filename
 
 app = Flask(__name__)
@@ -15,7 +16,17 @@ def index():
         "index.html",
         history=history_store.load_history(),
         projects=history_store.load_projects(),
+        refreshed=request.args.get("refreshed"),
+        added=request.args.get("added"),
     )
+
+
+@app.route("/refresh_read_seed", methods=["POST"])
+def refresh_read_seed():
+    seed = read_seed.scan_read_folder()
+    summary = history_store.merge_read_seed(seed)
+    total_added = summary["history_added"] + summary["projects_added"]
+    return redirect(url_for("index", refreshed=1, added=total_added))
 
 
 @app.route("/generate", methods=["POST"])
