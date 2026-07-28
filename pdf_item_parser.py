@@ -90,3 +90,37 @@ def map_table_columns(table):
     if "name" not in columns or ("qty" not in columns and "price" not in columns):
         return None
     return {"columns": columns, "data_start": header_idx + 1}
+
+
+def extract_items_from_table(table, mapping):
+    columns = mapping["columns"]
+
+    def first_col(field):
+        indices = columns.get(field)
+        return indices[0] if indices else None
+
+    name_col = first_col("name")
+    spec_col = first_col("spec")
+    unit_col = first_col("unit")
+    qty_col = first_col("qty")
+    price_cols = columns.get("price", [])
+
+    def cell(row, col):
+        if col is None or col >= len(row):
+            return ""
+        value = row[col]
+        return value.strip() if isinstance(value, str) else ("" if value is None else str(value).strip())
+
+    rows = []
+    for raw_row in table[mapping["data_start"]:]:
+        name = cell(raw_row, name_col)
+        if not name:
+            continue
+        rows.append({
+            "name": name,
+            "spec": cell(raw_row, spec_col),
+            "unit": cell(raw_row, unit_col),
+            "qty_raw": cell(raw_row, qty_col),
+            "price_raws": [cell(raw_row, c) for c in price_cols],
+        })
+    return rows

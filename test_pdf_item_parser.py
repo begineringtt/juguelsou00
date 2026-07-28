@@ -1,6 +1,6 @@
 from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
-    find_header_row, score_table, map_table_columns,
+    find_header_row, score_table, map_table_columns, extract_items_from_table,
 )
 
 
@@ -123,6 +123,44 @@ def test_map_table_columns_returns_none_without_qty_or_price():
     print("OK: test_map_table_columns_returns_none_without_qty_or_price")
 
 
+def test_extract_items_from_table_basic():
+    table = [
+        ["품명", "규격", "단위", "수량", "단가"],
+        ["볼트", "M12", "EA", "10", "1,000"],
+        ["", "", "", "", ""],
+    ]
+    mapping = map_table_columns(table)
+    rows = extract_items_from_table(table, mapping)
+    assert rows == [
+        {"name": "볼트", "spec": "M12", "unit": "EA", "qty_raw": "10", "price_raws": ["1,000"]},
+    ]
+    print("OK: test_extract_items_from_table_basic")
+
+
+def test_extract_items_from_table_keeps_both_duplicate_price_columns():
+    table = [
+        ["품 명", "형식", "수 량", "단가", "단가"],
+        ["DR100GF", "", "2", "520000", "1040000"],
+    ]
+    mapping = map_table_columns(table)
+    rows = extract_items_from_table(table, mapping)
+    assert rows[0]["price_raws"] == ["520000", "1040000"]
+    print("OK: test_extract_items_from_table_keeps_both_duplicate_price_columns")
+
+
+def test_extract_items_from_table_skips_rows_without_name():
+    table = [
+        ["품명", "수량", "단가"],
+        [None, "1", "100"],
+        ["볼트", "10", "1000"],
+    ]
+    mapping = map_table_columns(table)
+    rows = extract_items_from_table(table, mapping)
+    assert len(rows) == 1
+    assert rows[0]["name"] == "볼트"
+    print("OK: test_extract_items_from_table_skips_rows_without_name")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -137,4 +175,7 @@ if __name__ == "__main__":
     test_map_table_columns_detects_duplicate_price_header()
     test_map_table_columns_returns_none_without_name_column()
     test_map_table_columns_returns_none_without_qty_or_price()
+    test_extract_items_from_table_basic()
+    test_extract_items_from_table_keeps_both_duplicate_price_columns()
+    test_extract_items_from_table_skips_rows_without_name()
     print("ALL PASSED")
