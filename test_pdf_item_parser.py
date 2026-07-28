@@ -1,4 +1,7 @@
-from pdf_item_parser import normalize_header, match_field, match_field_fuzzy, parse_number
+from pdf_item_parser import (
+    normalize_header, match_field, match_field_fuzzy, parse_number,
+    find_header_row, score_table, map_table_columns,
+)
 
 
 def test_normalize_header_strips_whitespace_and_uppercases():
@@ -45,10 +48,93 @@ def test_parse_number_handles_currency_and_stray_spaces():
     print("OK: test_parse_number_handles_currency_and_stray_spaces")
 
 
+def test_find_header_row_at_index_zero():
+    table = [
+        ["품명", "수량", "단가"],
+        ["볼트", "10", "1000"],
+    ]
+    idx, score = find_header_row(table)
+    assert idx == 0
+    assert score == 3
+    print("OK: test_find_header_row_at_index_zero")
+
+
+def test_find_header_row_scans_past_summary_row():
+    table = [
+        ["합계금액 안내문", None, None],
+        ["No", "품 명", "규 격", "단위", "수량", "단 가", "금 액"],
+        ["1", "볼트", "M12", "EA", "10", "1000", "10000"],
+    ]
+    idx, score = find_header_row(table)
+    assert idx == 1
+    assert score == 5
+    print("OK: test_find_header_row_scans_past_summary_row")
+
+
+def test_score_table_counts_matched_fields():
+    assert score_table([["품명", "수량", "단가"]]) == 3
+    assert score_table([["회 사 명", "값"]]) == 0
+    assert score_table([]) == 0
+    print("OK: test_score_table_counts_matched_fields")
+
+
+def test_map_table_columns_basic():
+    table = [
+        ["품명", "규격", "단위", "수량", "단가", "비고"],
+        ["볼트", "M12", "EA", "10", "1000", ""],
+    ]
+    result = map_table_columns(table)
+    assert result["data_start"] == 1
+    assert result["columns"] == {"name": [0], "spec": [1], "unit": [2], "qty": [3], "price": [4]}
+    print("OK: test_map_table_columns_basic")
+
+
+def test_map_table_columns_finds_header_not_at_row_zero():
+    table = [
+        ["합계금액 안내문", None, None],
+        ["품명", "수량", "단가"],
+        ["볼트", "10", "1000"],
+    ]
+    result = map_table_columns(table)
+    assert result["data_start"] == 2
+    assert result["columns"]["name"] == [0]
+    print("OK: test_map_table_columns_finds_header_not_at_row_zero")
+
+
+def test_map_table_columns_detects_duplicate_price_header():
+    table = [
+        ["품 명", "형식", "수 량", "단가", "단가", "납기"],
+        ["DR100GF", "", "2", "520000", "1040000", "2-3일"],
+    ]
+    result = map_table_columns(table)
+    assert result["columns"]["price"] == [3, 4]
+    print("OK: test_map_table_columns_detects_duplicate_price_header")
+
+
+def test_map_table_columns_returns_none_without_name_column():
+    table = [["회 사 명", "주식회사 쉘파스페이스"]]
+    assert map_table_columns(table) is None
+    print("OK: test_map_table_columns_returns_none_without_name_column")
+
+
+def test_map_table_columns_returns_none_without_qty_or_price():
+    table = [["품명", "규격", "단위"], ["볼트", "M12", "EA"]]
+    assert map_table_columns(table) is None
+    print("OK: test_map_table_columns_returns_none_without_qty_or_price")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
     test_match_field_multiline_header_checks_each_line()
     test_match_field_fuzzy_matches_substring_with_bullet_prefix()
     test_parse_number_handles_currency_and_stray_spaces()
+    test_find_header_row_at_index_zero()
+    test_find_header_row_scans_past_summary_row()
+    test_score_table_counts_matched_fields()
+    test_map_table_columns_basic()
+    test_map_table_columns_finds_header_not_at_row_zero()
+    test_map_table_columns_detects_duplicate_price_header()
+    test_map_table_columns_returns_none_without_name_column()
+    test_map_table_columns_returns_none_without_qty_or_price()
     print("ALL PASSED")

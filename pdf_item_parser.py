@@ -58,3 +58,35 @@ def parse_number(text):
         return float(token)
     except ValueError:
         return None
+
+
+def find_header_row(table, max_scan=5):
+    best_idx, best_score = None, 0
+    for idx, row in enumerate(table[:max_scan]):
+        score = sum(1 for cell in row if match_field(cell))
+        if score > best_score:
+            best_idx, best_score = idx, score
+    return best_idx, best_score
+
+
+def score_table(table):
+    if not table:
+        return 0
+    _, score = find_header_row(table)
+    return score
+
+
+def map_table_columns(table):
+    if not table:
+        return None
+    header_idx, _ = find_header_row(table)
+    if header_idx is None:
+        return None
+    columns = {}
+    for idx, cell in enumerate(table[header_idx]):
+        field = match_field(cell)
+        if field:
+            columns.setdefault(field, []).append(idx)
+    if "name" not in columns or ("qty" not in columns and "price" not in columns):
+        return None
+    return {"columns": columns, "data_start": header_idx + 1}
