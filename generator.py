@@ -15,9 +15,12 @@ import io
 import os
 
 import openpyxl
+from openpyxl.styles import Border, Side
 from openpyxl.utils import get_column_letter
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from paths import bundle_dir
+
+BASE_DIR = bundle_dir()
 TEMPLATE_PATH = os.path.join(BASE_DIR, "template_files", "base_template.xlsx")
 
 SHEET_NAME = "지출결의서"
@@ -115,6 +118,55 @@ def _apply_row_style(ws, row, row_style):
     ws.row_dimensions[row].height = row_style["height"]
 
 
+_THIN_SIDE = Side(style="thin")
+_NO_SIDE = Side(style=None)
+
+
+def _capture_field_styles(ws, row):
+    """해당 행의 '앵커 서식'과 '빈 칸 서식'을 캡처한다.
+
+    품목 표는 필드(규격/단위/수량/단가 등)마다 병합 구간의 첫 컬럼(앵커)에만
+    폰트/배경/정렬/서식이 지정되고, 나머지 컬럼은 테두리만 다른 빈 칸 서식을
+    쓰는 구조다. 앵커는 항상 '품목' 필드의 시작 컬럼(TABLE_START_COL)과 같고,
+    빈 칸 서식은 그 다음 컬럼에서 그대로 가져올 수 있다 (품목 필드는 옵션이
+    아니라서 폭이 항상 2 이상이라 이 컬럼은 항상 같은 역할을 유지한다).
+    """
+
+    def _style_at(col):
+        c = ws.cell(row=row, column=col)
+        return {
+            "font": copy.copy(c.font),
+            "fill": copy.copy(c.fill),
+            "alignment": copy.copy(c.alignment),
+            "number_format": c.number_format,
+        }
+
+    return _style_at(TABLE_START_COL), _style_at(TABLE_START_COL + 1)
+
+
+def _style_field_span(ws, row, start_col, end_col, anchor_style, blank_style):
+    """필드의 병합 구간(start_col~end_col)에 테두리/앵커 서식을 다시 적용한다.
+
+    체크박스 조합에 따라 필드마다 컬럼 폭이 달라지므로, 원본 템플릿의 절대
+    좌표 서식을 그대로 복사하면 앵커가 다른 열로 밀렸을 때 테두리·배경색·
+    가운데 정렬이 깨진다. 그래서 병합 범위가 확정된 뒤 항상 이 함수로 역할
+    (앵커/빈 칸) 기준 서식을 새로 그린다.
+    """
+    for col in range(start_col, end_col + 1):
+        cell = ws.cell(row=row, column=col)
+        cell.border = Border(
+            left=_THIN_SIDE if col == start_col else _NO_SIDE,
+            right=_THIN_SIDE if col == end_col else _NO_SIDE,
+            top=_THIN_SIDE,
+            bottom=_THIN_SIDE,
+        )
+        style = anchor_style if col == start_col else blank_style
+        cell.font = style["font"]
+        cell.fill = style["fill"]
+        cell.alignment = style["alignment"]
+        cell.number_format = style["number_format"]
+
+
 def _add_item_row_merges(ws, row, layout):
     for start, end, _label in layout.values():
         if end > start:
@@ -126,6 +178,8 @@ def _col_letter(layout, key):
 
 
 def _rebuild_header_row(ws, layout):
+    anchor_style, blank_style = _capture_field_styles(ws, ITEM_HEADER_ROW)
+
     stale_merges = [
         m for m in list(ws.merged_cells.ranges)
         if m.min_row == ITEM_HEADER_ROW and m.max_row == ITEM_HEADER_ROW
@@ -142,6 +196,7 @@ def _rebuild_header_row(ws, layout):
             ws.merge_cells(start_row=ITEM_HEADER_ROW, start_column=start,
                             end_row=ITEM_HEADER_ROW, end_column=end)
         ws.cell(row=ITEM_HEADER_ROW, column=start).value = label
+        _style_field_span(ws, ITEM_HEADER_ROW, start, end, anchor_style, blank_style)
 
 
 def _rebuild_item_section(ws, items):
@@ -151,8 +206,10 @@ def _rebuild_item_section(ws, items):
     """
     # 1) 서식 캡처 (원본 위치 기준)
     style_item = _capture_row_style(ws, REF_ITEM_ROW)
+    item_anchor_style, item_blank_style = _capture_field_styles(ws, REF_ITEM_ROW)
     style_blank = _capture_row_style(ws, REF_BLANK_ROW)
     style_total = _capture_row_style(ws, REF_TOTAL_ROW)
+    total_anchor_style, total_blank_style = _capture_field_styles(ws, REF_TOTAL_ROW)
     style_gap1 = _capture_row_style(ws, REF_GAP1_ROW)
     style_gap2 = _capture_row_style(ws, REF_GAP2_ROW)
     style_gap3 = _capture_row_style(ws, REF_GAP3_ROW)
@@ -196,6 +253,8 @@ def _rebuild_item_section(ws, items):
             ws[f"{supply_letter}{row}"] = item.get("supply", 0)
         ws[f"{_col_letter(layout, 'vat')}{row}"] = f"={supply_letter}{row}/10"
         _add_item_row_merges(ws, row, layout)
+        for start, end, _label in layout.values():
+            _style_field_span(ws, row, start, end, item_anchor_style, item_blank_style)
         row += 1
 
     blank_row = row
@@ -208,9 +267,14 @@ def _rebuild_item_section(ws, items):
     _apply_row_style(ws, total_row, style_total)
     ws[f"C{total_row}"] = "합계 금액"
     ws[f"{supply_letter}{total_row}"] = f"=SUM({supply_letter}{FIRST_ITEM_ROW}:V{blank_row})"
-    label_end_letter = get_column_letter(layout["supply"][0] - 1)
+    supply_start_col = layout["supply"][0]
+    label_end_letter = get_column_letter(supply_start_col - 1)
     ws.merge_cells(f"C{total_row}:{label_end_letter}{total_row}")
     ws.merge_cells(f"{supply_letter}{total_row}:V{total_row}")
+    _style_field_span(ws, total_row, TABLE_START_COL, supply_start_col - 1,
+                       total_anchor_style, total_blank_style)
+    _style_field_span(ws, total_row, supply_start_col, TABLE_END_COL,
+                       total_anchor_style, total_blank_style)
     row += 1
 
     gap1_row = row
