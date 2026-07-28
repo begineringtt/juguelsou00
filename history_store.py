@@ -9,7 +9,9 @@
 import json
 import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from paths import app_dir
+
+BASE_DIR = app_dir()
 DATA_DIR = os.path.join(BASE_DIR, "data")
 HISTORY_PATH = os.path.join(DATA_DIR, "history.json")
 PROJECTS_PATH = os.path.join(DATA_DIR, "projects.json")

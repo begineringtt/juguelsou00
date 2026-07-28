@@ -3,7 +3,9 @@ import os
 
 import openpyxl
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from paths import app_dir
+
+BASE_DIR = app_dir()
 READ_DIR = os.path.join(BASE_DIR, "..", "read")
 
 HISTORY_LABEL_FIELDS = ["company", "requester", "title", "detail", "execution_note"]
