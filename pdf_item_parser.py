@@ -151,3 +151,16 @@ def resolve_duplicate_price_columns(rows):
             "price": _pick_price(qty, row["price_raws"]),
         })
     return resolved
+
+
+SUMMARY_KEYWORDS = ["합계", "소계", "이하", "총액", "TOTAL", "SUB TOTAL", "TAX", "REMARK"]
+
+
+def clean_item_rows(rows):
+    cleaned = []
+    for row in rows:
+        normalized_name = normalize_header(row["name"])
+        if any(normalize_header(keyword) in normalized_name for keyword in SUMMARY_KEYWORDS):
+            continue
+        cleaned.append(row)
+    return cleaned

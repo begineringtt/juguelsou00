@@ -1,7 +1,7 @@
 from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
     find_header_row, score_table, map_table_columns, extract_items_from_table,
-    resolve_duplicate_price_columns,
+    resolve_duplicate_price_columns, clean_item_rows,
 )
 
 
@@ -192,6 +192,27 @@ def test_resolve_duplicate_price_defaults_to_first_when_qty_missing():
     print("OK: test_resolve_duplicate_price_defaults_to_first_when_qty_missing")
 
 
+def test_clean_item_rows_drops_summary_and_footer_rows():
+    rows = [
+        {"name": "볼트", "spec": "", "unit": "EA", "qty": 10.0, "price": 1000.0},
+        {"name": "합 계", "spec": "", "unit": "", "qty": None, "price": None},
+        {"name": "** 이하여백 **", "spec": "", "unit": "", "qty": None, "price": None},
+        {"name": "Remark", "spec": "", "unit": "", "qty": None, "price": None},
+        {"name": "Sub Total", "spec": "", "unit": "", "qty": None, "price": None},
+        {"name": "너트", "spec": "", "unit": "EA", "qty": 5.0, "price": 500.0},
+    ]
+    cleaned = clean_item_rows(rows)
+    assert [r["name"] for r in cleaned] == ["볼트", "너트"]
+    print("OK: test_clean_item_rows_drops_summary_and_footer_rows")
+
+
+def test_clean_item_rows_keeps_category_like_rows():
+    rows = [{"name": "HONEYWELL", "spec": "", "unit": "", "qty": None, "price": None}]
+    cleaned = clean_item_rows(rows)
+    assert [r["name"] for r in cleaned] == ["HONEYWELL"]
+    print("OK: test_clean_item_rows_keeps_category_like_rows")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -213,4 +234,6 @@ if __name__ == "__main__":
     test_resolve_duplicate_price_picks_column_matching_qty_times_price()
     test_resolve_duplicate_price_handles_swapped_columns()
     test_resolve_duplicate_price_defaults_to_first_when_qty_missing()
+    test_clean_item_rows_drops_summary_and_footer_rows()
+    test_clean_item_rows_keeps_category_like_rows()
     print("ALL PASSED")
