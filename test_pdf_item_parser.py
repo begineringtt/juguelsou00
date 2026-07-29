@@ -1,6 +1,7 @@
 from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
     find_header_row, score_table, map_table_columns, extract_items_from_table,
+    resolve_duplicate_price_columns,
 )
 
 
@@ -161,6 +162,36 @@ def test_extract_items_from_table_skips_rows_without_name():
     print("OK: test_extract_items_from_table_skips_rows_without_name")
 
 
+def test_resolve_single_price_column():
+    rows = [{"name": "볼트", "spec": "M12", "unit": "EA", "qty_raw": "10", "price_raws": ["1,000"]}]
+    resolved = resolve_duplicate_price_columns(rows)
+    assert resolved == [{"name": "볼트", "spec": "M12", "unit": "EA", "qty": 10.0, "price": 1000.0}]
+    print("OK: test_resolve_single_price_column")
+
+
+def test_resolve_duplicate_price_picks_column_matching_qty_times_price():
+    rows = [{"name": "DR100GF", "spec": "", "unit": "", "qty_raw": "2", "price_raws": ["520000", "1040000"]}]
+    resolved = resolve_duplicate_price_columns(rows)
+    assert resolved[0]["price"] == 520000.0
+    assert resolved[0]["qty"] == 2.0
+    print("OK: test_resolve_duplicate_price_picks_column_matching_qty_times_price")
+
+
+def test_resolve_duplicate_price_handles_swapped_columns():
+    rows = [{"name": "X", "spec": "", "unit": "", "qty_raw": "2", "price_raws": ["1040000", "520000"]}]
+    resolved = resolve_duplicate_price_columns(rows)
+    assert resolved[0]["price"] == 520000.0
+    print("OK: test_resolve_duplicate_price_handles_swapped_columns")
+
+
+def test_resolve_duplicate_price_defaults_to_first_when_qty_missing():
+    rows = [{"name": "X", "spec": "", "unit": "", "qty_raw": "", "price_raws": ["520000", "1040000"]}]
+    resolved = resolve_duplicate_price_columns(rows)
+    assert resolved[0]["price"] == 520000.0
+    assert resolved[0]["qty"] is None
+    print("OK: test_resolve_duplicate_price_defaults_to_first_when_qty_missing")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -178,4 +209,8 @@ if __name__ == "__main__":
     test_extract_items_from_table_basic()
     test_extract_items_from_table_keeps_both_duplicate_price_columns()
     test_extract_items_from_table_skips_rows_without_name()
+    test_resolve_single_price_column()
+    test_resolve_duplicate_price_picks_column_matching_qty_times_price()
+    test_resolve_duplicate_price_handles_swapped_columns()
+    test_resolve_duplicate_price_defaults_to_first_when_qty_missing()
     print("ALL PASSED")

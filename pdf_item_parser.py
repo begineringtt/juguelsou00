@@ -124,3 +124,30 @@ def extract_items_from_table(table, mapping):
             "price_raws": [cell(raw_row, c) for c in price_cols],
         })
     return rows
+
+
+def _pick_price(qty, price_raws):
+    values = [parse_number(v) for v in price_raws]
+    if len(values) <= 1:
+        return values[0] if values else None
+    first, second = values[0], values[1]
+    if qty and first is not None and second is not None:
+        if abs(first * qty - second) <= max(1.0, second * 0.01):
+            return first
+        if abs(second * qty - first) <= max(1.0, first * 0.01):
+            return second
+    return first if first is not None else second
+
+
+def resolve_duplicate_price_columns(rows):
+    resolved = []
+    for row in rows:
+        qty = parse_number(row["qty_raw"])
+        resolved.append({
+            "name": row["name"],
+            "spec": row["spec"],
+            "unit": row["unit"],
+            "qty": qty,
+            "price": _pick_price(qty, row["price_raws"]),
+        })
+    return resolved
