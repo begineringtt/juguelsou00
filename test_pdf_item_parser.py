@@ -1,8 +1,12 @@
+import base64
+
+import fitz
+
 from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
     find_header_row, score_table, map_table_columns, extract_items_from_table,
     resolve_duplicate_price_columns, clean_item_rows, apply_hierarchical_prefix,
-    extract_paragraph_fallback,
+    extract_paragraph_fallback, render_page_images,
 )
 
 
@@ -265,6 +269,22 @@ def test_extract_paragraph_fallback_returns_none_without_name():
     print("OK: test_extract_paragraph_fallback_returns_none_without_name")
 
 
+def test_render_page_images_returns_one_png_per_page():
+    doc = fitz.open()
+    doc.new_page()
+    doc.new_page()
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    images = render_page_images(pdf_bytes)
+
+    assert len(images) == 2
+    for img_b64 in images:
+        raw = base64.b64decode(img_b64)
+        assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+    print("OK: test_render_page_images_returns_one_png_per_page")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -292,4 +312,5 @@ if __name__ == "__main__":
     test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged()
     test_extract_paragraph_fallback_finds_labelled_values()
     test_extract_paragraph_fallback_returns_none_without_name()
+    test_render_page_images_returns_one_png_per_page()
     print("ALL PASSED")

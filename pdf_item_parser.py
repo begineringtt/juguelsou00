@@ -1,4 +1,7 @@
+import base64
 import re
+
+import fitz
 
 HEADER_SYNONYMS = {
     "name": ["품명", "품 명", "공사명/품명", "물품명", "ITEM"],
@@ -203,3 +206,14 @@ def extract_paragraph_fallback(text):
         "qty": parse_number(found.get("qty")),
         "price": parse_number(found.get("price")),
     }
+
+
+def render_page_images(pdf_bytes, zoom=1.5):
+    images = []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    matrix = fitz.Matrix(zoom, zoom)
+    for page in doc:
+        pix = page.get_pixmap(matrix=matrix)
+        images.append(base64.b64encode(pix.tobytes("png")).decode("ascii"))
+    doc.close()
+    return images
