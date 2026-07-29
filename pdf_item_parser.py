@@ -164,3 +164,18 @@ def clean_item_rows(rows):
             continue
         cleaned.append(row)
     return cleaned
+
+
+def apply_hierarchical_prefix(rows):
+    result = []
+    prefix = None
+    for row in rows:
+        is_category = not row["spec"] and not row["unit"] and row["qty"] is None and row["price"] is None
+        if is_category:
+            prefix = row["name"]
+            continue
+        if prefix:
+            row = dict(row)
+            row["name"] = f"{prefix} - {row['name']}"
+        result.append(row)
+    return result

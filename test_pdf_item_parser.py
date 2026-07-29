@@ -1,7 +1,7 @@
 from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
     find_header_row, score_table, map_table_columns, extract_items_from_table,
-    resolve_duplicate_price_columns, clean_item_rows,
+    resolve_duplicate_price_columns, clean_item_rows, apply_hierarchical_prefix,
 )
 
 
@@ -213,6 +213,33 @@ def test_clean_item_rows_keeps_category_like_rows():
     print("OK: test_clean_item_rows_keeps_category_like_rows")
 
 
+def test_apply_hierarchical_prefix_prefixes_following_rows():
+    rows = [
+        {"name": "온실제어 INTERFACE", "spec": "", "unit": "", "qty": None, "price": None},
+        {"name": "외함", "spec": "옥내형", "unit": "EA", "qty": 1.0, "price": 500000.0},
+        {"name": "누전차단기", "spec": "EBS33~32", "unit": "식", "qty": 1.0, "price": 250000.0},
+        {"name": "제어 CONTROLLER", "spec": "", "unit": "", "qty": None, "price": None},
+        {"name": "PLC+TOUCH", "spec": "DR16S", "unit": "SET", "qty": 2.0, "price": 1700000.0},
+    ]
+    result = apply_hierarchical_prefix(rows)
+    assert [r["name"] for r in result] == [
+        "온실제어 INTERFACE - 외함",
+        "온실제어 INTERFACE - 누전차단기",
+        "제어 CONTROLLER - PLC+TOUCH",
+    ]
+    print("OK: test_apply_hierarchical_prefix_prefixes_following_rows")
+
+
+def test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged():
+    rows = [
+        {"name": "볼트", "spec": "M12", "unit": "EA", "qty": 10.0, "price": 1000.0},
+        {"name": "너트", "spec": "M12", "unit": "EA", "qty": 5.0, "price": 500.0},
+    ]
+    result = apply_hierarchical_prefix(rows)
+    assert result == rows
+    print("OK: test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -236,4 +263,6 @@ if __name__ == "__main__":
     test_resolve_duplicate_price_defaults_to_first_when_qty_missing()
     test_clean_item_rows_drops_summary_and_footer_rows()
     test_clean_item_rows_keeps_category_like_rows()
+    test_apply_hierarchical_prefix_prefixes_following_rows()
+    test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged()
     print("ALL PASSED")
