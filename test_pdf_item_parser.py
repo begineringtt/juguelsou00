@@ -2,6 +2,7 @@ from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
     find_header_row, score_table, map_table_columns, extract_items_from_table,
     resolve_duplicate_price_columns, clean_item_rows, apply_hierarchical_prefix,
+    extract_paragraph_fallback,
 )
 
 
@@ -240,6 +241,30 @@ def test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged():
     print("OK: test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged")
 
 
+def test_extract_paragraph_fallback_finds_labelled_values():
+    text = (
+        "ㅇ. 품 명 : AL- Ingot\n"
+        "ㅇ. 출 고 일 : 2026년 6월 1일\n"
+        "ㅇ. 수 량 : 1.950 MT\n"
+        "ㅇ. 단 가 : 6,250,000 원/MT (가단가)\n"
+        "ㅇ. 공 급 가 액 : 12,187,500 원\n"
+        "ㅇ. 부 가 세 : 1,218,750 원\n"
+    )
+    item = extract_paragraph_fallback(text)
+    assert item["name"] == "AL- Ingot"
+    assert item["qty"] == 1.95
+    assert item["price"] == 6250000.0
+    assert item["spec"] == ""
+    assert item["unit"] == ""
+    print("OK: test_extract_paragraph_fallback_finds_labelled_values")
+
+
+def test_extract_paragraph_fallback_returns_none_without_name():
+    text = "문서번호 : KOR-260601-07\n수 신 : ㈜그린플러스\n"
+    assert extract_paragraph_fallback(text) is None
+    print("OK: test_extract_paragraph_fallback_returns_none_without_name")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -265,4 +290,6 @@ if __name__ == "__main__":
     test_clean_item_rows_keeps_category_like_rows()
     test_apply_hierarchical_prefix_prefixes_following_rows()
     test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged()
+    test_extract_paragraph_fallback_finds_labelled_values()
+    test_extract_paragraph_fallback_returns_none_without_name()
     print("ALL PASSED")

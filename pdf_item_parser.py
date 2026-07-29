@@ -179,3 +179,27 @@ def apply_hierarchical_prefix(rows):
             row["name"] = f"{prefix} - {row['name']}"
         result.append(row)
     return result
+
+
+def extract_paragraph_fallback(text):
+    found = {}
+    for line in text.split("\n"):
+        sep = ":" if ":" in line else ("：" if "：" in line else None)
+        if sep is None:
+            continue
+        label, _, value = line.partition(sep)
+        field = match_field_fuzzy(label)
+        if not field or field in found:
+            continue
+        value = value.strip()
+        if value:
+            found[field] = value
+    if "name" not in found:
+        return None
+    return {
+        "name": found.get("name", ""),
+        "spec": found.get("spec", ""),
+        "unit": found.get("unit", ""),
+        "qty": parse_number(found.get("qty")),
+        "price": parse_number(found.get("price")),
+    }
