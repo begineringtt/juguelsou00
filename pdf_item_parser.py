@@ -1,7 +1,9 @@
 import base64
+import io
 import re
 
 import fitz
+import pdfplumber
 
 HEADER_SYNONYMS = {
     "name": ["품명", "품 명", "공사명/품명", "물품명", "ITEM"],
@@ -217,3 +219,39 @@ def render_page_images(pdf_bytes, zoom=1.5):
         images.append(base64.b64encode(pix.tobytes("png")).decode("ascii"))
     doc.close()
     return images
+
+
+def _find_best_table(pdf):
+    best_table, best_score = None, 0
+    for page in pdf.pages:
+        for table in page.extract_tables():
+            score = score_table(table)
+            if score > best_score:
+                best_table, best_score = table, score
+    return best_table
+
+
+def parse_pdf_items(pdf_bytes):
+    warnings = []
+    page_images = render_page_images(pdf_bytes)
+
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        best_table = _find_best_table(pdf)
+        mapping = map_table_columns(best_table) if best_table else None
+
+        if mapping:
+            raw_rows = extract_items_from_table(best_table, mapping)
+            resolved_rows = resolve_duplicate_price_columns(raw_rows)
+            cleaned_rows = clean_item_rows(resolved_rows)
+            items = apply_hierarchical_prefix(cleaned_rows)
+        else:
+            full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            fallback_item = extract_paragraph_fallback(full_text)
+            if fallback_item:
+                items = [fallback_item]
+                warnings.append("표를 찾지 못해 일부 항목만 인식했습니다. 나머지는 직접 입력해주세요.")
+            else:
+                items = []
+                warnings.append("표를 인식하지 못했습니다. 직접 입력해주세요.")
+
+    return {"items": items, "page_images": page_images, "warnings": warnings}

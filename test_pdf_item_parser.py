@@ -1,4 +1,5 @@
 import base64
+import os
 
 import fitz
 
@@ -6,8 +7,15 @@ from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
     find_header_row, score_table, map_table_columns, extract_items_from_table,
     resolve_duplicate_price_columns, clean_item_rows, apply_hierarchical_prefix,
-    extract_paragraph_fallback, render_page_images,
+    extract_paragraph_fallback, render_page_images, parse_pdf_items,
 )
+
+SAMPLE_DIR = r"D:\claude_personal\setting_01\PDF_read"
+
+
+def _load_sample(filename):
+    with open(os.path.join(SAMPLE_DIR, filename), "rb") as f:
+        return f.read()
 
 
 def test_normalize_header_strips_whitespace_and_uppercases():
@@ -285,6 +293,57 @@ def test_render_page_images_returns_one_png_per_page():
     print("OK: test_render_page_images_returns_one_png_per_page")
 
 
+def test_parse_pdf_items_normal_table_case():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_normal_table_case (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_한수_근권부.pdf"))
+    names = [it["name"] for it in result["items"]]
+    assert names == ["무선 온습도 데이터 로거", "CO2 데이터 로거"]
+    assert result["items"][0]["spec"] == "TR-72"
+    assert result["items"][0]["unit"] == "SET"
+    assert result["items"][0]["qty"] == 13.0
+    assert result["items"][0]["price"] == 660000.0
+    assert result["warnings"] == []
+    assert len(result["page_images"]) == 1
+    print("OK: test_parse_pdf_items_normal_table_case")
+
+
+def test_parse_pdf_items_hierarchical_case():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_hierarchical_case (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("2. 견적서(제어)-온실제어장치-26.05_수정.pdf"))
+    names = [it["name"] for it in result["items"]]
+    assert "온실제어 INTERFACE - 외함" in names
+    assert "제어 CONTROLLER - PLC+TOUCH" in names
+    assert "배선 자재 - 전선(F-CV)" in names
+    print("OK: test_parse_pdf_items_hierarchical_case")
+
+
+def test_parse_pdf_items_duplicate_header_case():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_duplicate_header_case (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("한열사_견적서_북미.pdf"))
+    by_name = {it["name"]: it for it in result["items"]}
+    assert by_name["HONEYWELL - DR100GF"]["price"] == 520000.0
+    assert by_name["HONEYWELL - DR100GF"]["qty"] == 2.0
+    print("OK: test_parse_pdf_items_duplicate_header_case")
+
+
+def test_parse_pdf_items_no_table_fallback_case():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_no_table_fallback_case (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_코랄_수확후.pdf"))
+    assert len(result["items"]) == 1
+    assert result["items"][0]["name"] == "AL- Ingot"
+    assert result["items"][0]["price"] == 6250000.0
+    assert result["warnings"]
+    print("OK: test_parse_pdf_items_no_table_fallback_case")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -313,4 +372,8 @@ if __name__ == "__main__":
     test_extract_paragraph_fallback_finds_labelled_values()
     test_extract_paragraph_fallback_returns_none_without_name()
     test_render_page_images_returns_one_png_per_page()
+    test_parse_pdf_items_normal_table_case()
+    test_parse_pdf_items_hierarchical_case()
+    test_parse_pdf_items_duplicate_header_case()
+    test_parse_pdf_items_no_table_fallback_case()
     print("ALL PASSED")
