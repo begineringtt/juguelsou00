@@ -35,7 +35,10 @@ def parse_pdf():
     file = request.files.get("file")
     if not file:
         return jsonify({"error": "파일이 없습니다."}), 400
-    result = parse_pdf_items(file.read())
+    try:
+        result = parse_pdf_items(file.read())
+    except Exception:
+        return jsonify({"error": "PDF를 읽을 수 없습니다. 파일이 손상되었거나 PDF 형식이 아닐 수 있습니다."}), 400
     return jsonify(result)
 
 

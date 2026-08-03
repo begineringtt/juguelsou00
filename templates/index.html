@@ -465,13 +465,19 @@ const pdfImagePane = document.getElementById('pdfImagePane');
 const pdfWarnings = document.getElementById('pdfWarnings');
 const pdfApplyChoice = document.getElementById('pdfApplyChoice');
 
+function escapeHtml(value) {
+  const div = document.createElement('div');
+  div.textContent = value == null ? '' : String(value);
+  return div.innerHTML;
+}
+
 function addDraftRow(prefill) {
   prefill = prefill || {};
   const tr = document.createElement('tr');
   tr.innerHTML = `
-    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-name" value="${prefill.name || ''}" style="width:100%;border:none;"></td>
-    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-spec" value="${prefill.spec || ''}" style="width:100%;border:none;"></td>
-    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-unit" value="${prefill.unit || ''}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-name" value="${escapeHtml(prefill.name || '')}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-spec" value="${escapeHtml(prefill.spec || '')}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-unit" value="${escapeHtml(prefill.unit || '')}" style="width:100%;border:none;"></td>
     <td style="border:1px solid var(--border);padding:4px;"><input type="number" class="d-qty" value="${prefill.qty ?? ''}" style="width:100%;border:none;"></td>
     <td style="border:1px solid var(--border);padding:4px;"><input type="number" class="d-price" value="${prefill.price ?? ''}" style="width:100%;border:none;"></td>
     <td style="border:1px solid var(--border);padding:4px;"><button type="button" class="small removeDraftBtn">삭제</button></td>

@@ -33,7 +33,16 @@ def test_parse_pdf_route_requires_file():
     print("OK: test_parse_pdf_route_requires_file")
 
 
+def test_parse_pdf_route_returns_400_for_invalid_pdf():
+    client = app_module.app.test_client()
+    data = {"file": (io.BytesIO(b"not a pdf"), "quote.pdf")}
+    resp = client.post("/parse_pdf", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    print("OK: test_parse_pdf_route_returns_400_for_invalid_pdf")
+
+
 if __name__ == "__main__":
     test_parse_pdf_route_returns_json_with_expected_keys()
     test_parse_pdf_route_requires_file()
+    test_parse_pdf_route_returns_400_for_invalid_pdf()
     print("ALL PASSED")

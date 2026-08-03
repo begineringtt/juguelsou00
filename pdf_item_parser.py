@@ -65,6 +65,8 @@ def parse_number(text):
         return None
 
 
+# max_scan is unused by any current caller (both call sites scan the whole
+# table) — kept as an escape hatch if a future table ever needs capping.
 def find_header_row(table, max_scan=None):
     best_idx, best_score = None, 0
     rows = table[:max_scan] if max_scan is not None else table
@@ -238,11 +240,13 @@ def extract_paragraph_fallback(text):
 def render_page_images(pdf_bytes, zoom=1.5):
     images = []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    matrix = fitz.Matrix(zoom, zoom)
-    for page in doc:
-        pix = page.get_pixmap(matrix=matrix)
-        images.append(base64.b64encode(pix.tobytes("png")).decode("ascii"))
-    doc.close()
+    try:
+        matrix = fitz.Matrix(zoom, zoom)
+        for page in doc:
+            pix = page.get_pixmap(matrix=matrix)
+            images.append(base64.b64encode(pix.tobytes("png")).decode("ascii"))
+    finally:
+        doc.close()
     return images
 
 
