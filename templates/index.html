@@ -553,6 +553,9 @@ document.getElementById('pdfFileInput').addEventListener('change', async (e) => 
   e.target.value = '';
 });
 
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+
 const itemsFieldset = document.getElementById('itemsFieldset');
 ['dragenter', 'dragover'].forEach(evt => {
   itemsFieldset.addEventListener(evt, (e) => {
