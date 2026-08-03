@@ -42,6 +42,12 @@ def test_match_field_multiline_header_checks_each_line():
     print("OK: test_match_field_multiline_header_checks_each_line")
 
 
+def test_match_field_recognizes_description_as_name():
+    assert match_field("DESCRIPTION") == "name"
+    assert match_field("품 명\nDESCRIPTION") == "name"
+    print("OK: test_match_field_recognizes_description_as_name")
+
+
 def test_match_field_fuzzy_matches_substring_with_bullet_prefix():
     assert match_field_fuzzy("ㅇ. 품 명 ") == "name"
     assert match_field_fuzzy("ㅇ. 단 가 ") == "price"
@@ -189,6 +195,31 @@ def test_extract_items_from_table_skips_rows_without_name():
     assert len(rows) == 1
     assert rows[0]["name"] == "볼트"
     print("OK: test_extract_items_from_table_skips_rows_without_name")
+
+
+def test_extract_items_from_table_recovers_data_fused_into_header_row():
+    table = [
+        ["품 명\nDESCRIPTION\n온습도검출기", "규격\nSIZE\n범위 -20~80", "단위\nUNIT\nEA", "수량\nQ'TY\n3", "단가\nUNIT PRICE\n550,000"],
+        ["온도검출기", "범위 -40~60", "EA", "2", "258,000"],
+    ]
+    mapping = map_table_columns(table)
+    rows = extract_items_from_table(table, mapping)
+    assert rows[0] == {"name": "온습도검출기", "spec": "범위 -20~80", "unit": "EA", "qty_raw": "3", "price_raws": ["550,000"]}
+    assert rows[1]["name"] == "온도검출기"
+    assert len(rows) == 2
+    print("OK: test_extract_items_from_table_recovers_data_fused_into_header_row")
+
+
+def test_extract_items_from_table_no_phantom_row_for_bilingual_header_without_fused_data():
+    table = [
+        ["공사명/품명\nDESCRIPTION", "규격\nSIZE", "수량\nQ'TY", "단위\nUNIT", "단가\nUNIT PRICE"],
+        ["외함", "옥내형", "1", "EA", "500000"],
+    ]
+    mapping = map_table_columns(table)
+    rows = extract_items_from_table(table, mapping)
+    assert len(rows) == 1
+    assert rows[0]["name"] == "외함"
+    print("OK: test_extract_items_from_table_no_phantom_row_for_bilingual_header_without_fused_data")
 
 
 def test_resolve_single_price_column():
@@ -365,6 +396,7 @@ if __name__ == "__main__":
     test_match_field_exact_single_line()
     test_match_field_multiline_header_checks_each_line()
     test_match_field_fuzzy_matches_substring_with_bullet_prefix()
+    test_match_field_recognizes_description_as_name()
     test_parse_number_handles_currency_and_stray_spaces()
     test_find_header_row_at_index_zero()
     test_find_header_row_scans_past_summary_row()
@@ -378,6 +410,8 @@ if __name__ == "__main__":
     test_extract_items_from_table_basic()
     test_extract_items_from_table_keeps_both_duplicate_price_columns()
     test_extract_items_from_table_skips_rows_without_name()
+    test_extract_items_from_table_recovers_data_fused_into_header_row()
+    test_extract_items_from_table_no_phantom_row_for_bilingual_header_without_fused_data()
     test_resolve_single_price_column()
     test_resolve_duplicate_price_picks_column_matching_qty_times_price()
     test_resolve_duplicate_price_handles_swapped_columns()

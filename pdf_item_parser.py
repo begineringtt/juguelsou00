@@ -6,7 +6,7 @@ import fitz
 import pdfplumber
 
 HEADER_SYNONYMS = {
-    "name": ["품명", "품 명", "공사명/품명", "물품명", "ITEM"],
+    "name": ["품명", "품 명", "공사명/품명", "물품명", "ITEM", "DESCRIPTION"],
     "spec": ["규격", "규 격", "SIZE", "형식", "규격/색상", "사양"],
     "unit": ["단위", "단 위", "UNIT"],
     "qty": ["수량", "수 량", "Q'TY", "QTY"],
@@ -98,6 +98,17 @@ def map_table_columns(table):
     return {"columns": columns, "data_start": header_idx + 1}
 
 
+def _header_cell_leftover(cell_text):
+    if not cell_text:
+        return ""
+    lines = str(cell_text).split("\n")
+    last_label_idx = -1
+    for idx, line in enumerate(lines):
+        if match_field(line):
+            last_label_idx = idx
+    return "\n".join(lines[last_label_idx + 1:]).strip()
+
+
 def extract_items_from_table(table, mapping):
     columns = mapping["columns"]
 
@@ -117,8 +128,21 @@ def extract_items_from_table(table, mapping):
         value = row[col]
         return value.strip() if isinstance(value, str) else ("" if value is None else str(value).strip())
 
+    header_row = table[mapping["data_start"] - 1]
+    leftover = {}
+    for indices in columns.values():
+        for idx in indices:
+            text = _header_cell_leftover(header_row[idx] if idx < len(header_row) else "")
+            if text:
+                leftover[idx] = text
+
+    data_rows = table[mapping["data_start"]:]
+    if leftover:
+        synthetic_row = [leftover.get(i, "") for i in range(max(leftover) + 1)]
+        data_rows = [synthetic_row] + data_rows
+
     rows = []
-    for raw_row in table[mapping["data_start"]:]:
+    for raw_row in data_rows:
         name = cell(raw_row, name_col)
         if not name:
             continue
