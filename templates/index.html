@@ -279,6 +279,8 @@
       </table>
       <div class="row-buttons">
         <button type="button" class="small" id="addRowBtn">+ 품목 추가</button>
+        <button type="button" class="small" id="pdfUploadBtn">📄 PDF로 품목 불러오기</button>
+        <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none">
       </div>
       <div class="totals">
         공급가 합계: <span id="sumSupply">0</span>원 &nbsp;|&nbsp;
@@ -290,6 +292,40 @@
     <button type="submit" class="primary">엑셀 파일 생성</button>
     <div id="msg"></div>
   </form>
+
+  <div id="pdfModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;">
+    <div style="background:#fff;max-width:1000px;margin:40px auto;border-radius:10px;padding:20px 24px;max-height:85vh;overflow:auto;">
+      <h2 style="font-size:16px;margin:0 0 10px;">PDF에서 품목 불러오기</h2>
+      <div id="pdfWarnings" style="color:#b42318;font-size:12.5px;margin-bottom:10px;"></div>
+      <div style="display:flex;gap:16px;">
+        <div id="pdfImagePane" style="flex:1;overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:6px;padding:6px;"></div>
+        <div style="flex:1;overflow:auto;max-height:60vh;">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+              <tr>
+                <th style="border:1px solid var(--border);padding:6px;">품목</th>
+                <th style="border:1px solid var(--border);padding:6px;">규격</th>
+                <th style="border:1px solid var(--border);padding:6px;">단위</th>
+                <th style="border:1px solid var(--border);padding:6px;">수량</th>
+                <th style="border:1px solid var(--border);padding:6px;">단가</th>
+                <th style="border:1px solid var(--border);padding:6px;"></th>
+              </tr>
+            </thead>
+            <tbody id="pdfDraftBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="pdfApplyChoice" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+        <p style="font-size:13px;margin:0 0 8px;">기존에 입력된 품목이 있습니다. 어떻게 반영할까요?</p>
+        <button type="button" class="small" id="pdfReplaceBtn">① 기존 삭제 후 업로드 내용으로 작성</button>
+        <button type="button" class="small" id="pdfAppendBtn">② 기존 유지 후 업로드 내용 추가</button>
+      </div>
+      <div class="row-buttons" style="margin-top:14px;">
+        <button type="button" class="small" id="pdfCancelBtn">취소</button>
+        <button type="button" class="small" id="pdfApplyBtn">표에 적용</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -422,6 +458,101 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
     msg.textContent = '오류가 발생했습니다: ' + err.message;
   }
 });
+
+const pdfModalOverlay = document.getElementById('pdfModalOverlay');
+const pdfDraftBody = document.getElementById('pdfDraftBody');
+const pdfImagePane = document.getElementById('pdfImagePane');
+const pdfWarnings = document.getElementById('pdfWarnings');
+const pdfApplyChoice = document.getElementById('pdfApplyChoice');
+
+function addDraftRow(prefill) {
+  prefill = prefill || {};
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-name" value="${prefill.name || ''}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-spec" value="${prefill.spec || ''}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-unit" value="${prefill.unit || ''}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><input type="number" class="d-qty" value="${prefill.qty ?? ''}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><input type="number" class="d-price" value="${prefill.price ?? ''}" style="width:100%;border:none;"></td>
+    <td style="border:1px solid var(--border);padding:4px;"><button type="button" class="small removeDraftBtn">삭제</button></td>
+  `;
+  pdfDraftBody.appendChild(tr);
+  tr.querySelector('.removeDraftBtn').addEventListener('click', () => tr.remove());
+}
+
+function openPdfModal(result) {
+  pdfDraftBody.innerHTML = '';
+  pdfImagePane.innerHTML = '';
+  pdfWarnings.textContent = (result.warnings || []).join(' ');
+  result.page_images.forEach(b64 => {
+    const img = document.createElement('img');
+    img.src = 'data:image/png;base64,' + b64;
+    img.style.width = '100%';
+    img.style.marginBottom = '8px';
+    pdfImagePane.appendChild(img);
+  });
+  (result.items || []).forEach(item => addDraftRow(item));
+  pdfApplyChoice.style.display = 'none';
+  pdfModalOverlay.style.display = 'block';
+}
+
+function closePdfModal() {
+  pdfModalOverlay.style.display = 'none';
+  document.getElementById('pdfFileInput').value = '';
+}
+
+function collectDraftItems() {
+  return [...pdfDraftBody.querySelectorAll('tr')].map(tr => ({
+    name: tr.querySelector('.d-name').value,
+    spec: tr.querySelector('.d-spec').value,
+    unit: tr.querySelector('.d-unit').value,
+    qty: parseFloat(tr.querySelector('.d-qty').value) || 0,
+    price: parseFloat(tr.querySelector('.d-price').value) || 0,
+  })).filter(item => item.name.trim());
+}
+
+function applyDraftItems(mode) {
+  const draftItems = collectDraftItems();
+  if (mode === 'replace') {
+    itemsBody.innerHTML = '';
+  }
+  draftItems.forEach(item => addRow(item));
+  closePdfModal();
+  recalc();
+}
+
+document.getElementById('pdfUploadBtn').addEventListener('click', () => {
+  document.getElementById('pdfFileInput').click();
+});
+
+document.getElementById('pdfFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/parse_pdf', { method: 'POST', body: fd });
+  if (!res.ok) {
+    alert('PDF 인식에 실패했습니다.');
+    return;
+  }
+  const result = await res.json();
+  openPdfModal(result);
+});
+
+document.getElementById('pdfCancelBtn').addEventListener('click', closePdfModal);
+
+document.getElementById('pdfApplyBtn').addEventListener('click', () => {
+  const hasExisting = itemsBody.querySelectorAll('tr').length > 0
+    && [...itemsBody.querySelectorAll('tr')].some(tr => tr.querySelector('.f-name').value.trim());
+  if (hasExisting) {
+    pdfApplyChoice.style.display = 'block';
+  } else {
+    applyDraftItems('append');
+  }
+});
+
+document.getElementById('pdfReplaceBtn').addEventListener('click', () => applyDraftItems('replace'));
+document.getElementById('pdfAppendBtn').addEventListener('click', () => applyDraftItems('append'));
 </script>
 </body>
 </html>
