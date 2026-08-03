@@ -65,9 +65,10 @@ def parse_number(text):
         return None
 
 
-def find_header_row(table, max_scan=5):
+def find_header_row(table, max_scan=None):
     best_idx, best_score = None, 0
-    for idx, row in enumerate(table[:max_scan]):
+    rows = table[:max_scan] if max_scan is not None else table
+    for idx, row in enumerate(rows):
         score = sum(1 for cell in row if match_field(cell))
         if score > best_score:
             best_idx, best_score = idx, score

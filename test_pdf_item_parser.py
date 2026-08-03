@@ -85,6 +85,22 @@ def test_find_header_row_scans_past_summary_row():
     print("OK: test_find_header_row_scans_past_summary_row")
 
 
+def test_find_header_row_scans_past_five_metadata_rows():
+    table = [
+        ["사업자 번호", "311-09-25603"],
+        ["업체 / 대표", "세화볼트"],
+        ["주 소", "경기 화성시"],
+        ["업 종", "도소매"],
+        ["전화 / 팩스", "031-000-0000"],
+        ["순번", "품 명", "규 격", "단 위", "수량", "단 가", "공급가액", "비 고"],
+        ["1", "볼트", "M12", "EA", "10", "1000", "10000", ""],
+    ]
+    idx, score = find_header_row(table)
+    assert idx == 5
+    assert score == 5
+    print("OK: test_find_header_row_scans_past_five_metadata_rows")
+
+
 def test_score_table_counts_matched_fields():
     assert score_table([["품명", "수량", "단가"]]) == 3
     assert score_table([["회 사 명", "값"]]) == 0
@@ -352,6 +368,7 @@ if __name__ == "__main__":
     test_parse_number_handles_currency_and_stray_spaces()
     test_find_header_row_at_index_zero()
     test_find_header_row_scans_past_summary_row()
+    test_find_header_row_scans_past_five_metadata_rows()
     test_score_table_counts_matched_fields()
     test_map_table_columns_basic()
     test_map_table_columns_finds_header_not_at_row_zero()
