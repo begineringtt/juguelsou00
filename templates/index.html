@@ -40,6 +40,10 @@
     margin-bottom: 20px;
     padding: 16px 18px 18px;
   }
+  fieldset.drag-over {
+    border: 2px dashed var(--accent);
+    background: #f0f7f3;
+  }
   legend {
     font-weight: bold;
     font-size: 13px;
@@ -255,7 +259,7 @@
       </div>
     </fieldset>
 
-    <fieldset>
+    <fieldset id="itemsFieldset">
       <legend>품목</legend>
       <div class="col-toggles">
         <label><input type="checkbox" id="colSpec" name="use_spec" checked> 규격</label>
@@ -527,12 +531,7 @@ function applyDraftItems(mode) {
   recalc();
 }
 
-document.getElementById('pdfUploadBtn').addEventListener('click', () => {
-  document.getElementById('pdfFileInput').click();
-});
-
-document.getElementById('pdfFileInput').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
+async function uploadPdfFile(file) {
   if (!file) return;
   const fd = new FormData();
   fd.append('file', file);
@@ -543,6 +542,33 @@ document.getElementById('pdfFileInput').addEventListener('change', async (e) => 
   }
   const result = await res.json();
   openPdfModal(result);
+}
+
+document.getElementById('pdfUploadBtn').addEventListener('click', () => {
+  document.getElementById('pdfFileInput').click();
+});
+
+document.getElementById('pdfFileInput').addEventListener('change', async (e) => {
+  await uploadPdfFile(e.target.files[0]);
+  e.target.value = '';
+});
+
+const itemsFieldset = document.getElementById('itemsFieldset');
+['dragenter', 'dragover'].forEach(evt => {
+  itemsFieldset.addEventListener(evt, (e) => {
+    e.preventDefault();
+    itemsFieldset.classList.add('drag-over');
+  });
+});
+['dragleave', 'dragend'].forEach(evt => {
+  itemsFieldset.addEventListener(evt, () => itemsFieldset.classList.remove('drag-over'));
+});
+itemsFieldset.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  itemsFieldset.classList.remove('drag-over');
+  const file = [...(e.dataTransfer?.files || [])].find(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+  if (!file) return;
+  await uploadPdfFile(file);
 });
 
 document.getElementById('pdfCancelBtn').addEventListener('click', closePdfModal);
