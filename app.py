@@ -1,11 +1,12 @@
 import threading
 import webbrowser
 
-from flask import Flask, redirect, render_template, request, send_file, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 
 import history_store
 import read_seed
 from generator import build_expense_report, suggest_filename
+from pdf_item_parser import parse_pdf_items
 
 app = Flask(__name__)
 
@@ -27,6 +28,15 @@ def refresh_read_seed():
     summary = history_store.merge_read_seed(seed)
     total_added = summary["history_added"] + summary["projects_added"]
     return redirect(url_for("index", refreshed=1, added=total_added))
+
+
+@app.route("/parse_pdf", methods=["POST"])
+def parse_pdf():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "파일이 없습니다."}), 400
+    result = parse_pdf_items(file.read())
+    return jsonify(result)
 
 
 @app.route("/generate", methods=["POST"])
