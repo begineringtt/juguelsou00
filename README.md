@@ -9,24 +9,28 @@
 - Python 3.10 이상
 - (Windows) 인터넷 브라우저 (앱 실행 시 자동으로 열립니다)
 
-## 설치
+## 설치 및 실행
+
+### Windows (Python 없이도 OK)
+
+1. 이 저장소를 다운로드/클론합니다.
+2. `설치.bat` 파일을 더블클릭합니다.
+   - Python이 없으면 자동으로 설치를 시도합니다(winget 사용). 이 경우 설치 후
+     창을 닫고 `설치.bat`을 한 번 더 실행해달라는 안내가 뜹니다(새로 설치된
+     Python은 같은 창에서 바로 인식되지 않기 때문입니다).
+   - Python이 이미 있으면 바로 필요한 패키지를 설치하고 프로그램을 실행합니다.
+3. 다음부터는 `실행.bat`만 더블클릭하면 됩니다.
+
+### 직접 설치(Mac/Linux 포함)
 
 ```bash
 git clone <이 저장소의 clone 주소>
 cd expense_form_app
 pip install -r requirements.txt
-```
-
-## 실행
-
-```bash
 python app.py
 ```
 
 실행하면 브라우저가 자동으로 `http://127.0.0.1:5000` 을 열어줍니다.
-
-Windows에서는 `실행.bat` 파일을 더블클릭해도 동일하게 실행됩니다 (위 `pip install`은
-최초 1회만 하면 됩니다).
 
 ## 사용법
 
