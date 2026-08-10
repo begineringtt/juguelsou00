@@ -33,6 +33,35 @@ DEFAULT_PROJECTS = [
     },
 ]
 
+# 과제 선택 드롭다운에 표시할 축약명. 실제 문서에 들어가는 과제명(정식 명칭)은
+# project_name 필드 그대로 유지하고, 목록에서 고르기 쉽도록 표시 텍스트만 축약한다.
+# 스캔해온 과제명은 가운뎃점 표기 차이 등 이문(異文)이 섞여 있어 완전 일치 대신
+# 각 과제를 구분 짓는 키워드로 매칭한다. (순서대로 첫 매치를 사용)
+PROJECT_LABEL_KEYWORDS = [
+    ("수확", "수확후"),
+    ("고효율", "고효율"),
+    ("탄소", "탄소"),
+    ("저온성", "저온성"),
+    ("고온성", "고온성"),
+    ("북미", "북미"),
+    ("인건비", "자동화"),
+    ("중동", "중동(IR)"),
+    ("근권부", "근권부"),
+    ("로봇", "로봇"),
+]
+
+
+def short_label(project_name):
+    for keyword, label in PROJECT_LABEL_KEYWORDS:
+        if keyword in project_name:
+            return label
+    return project_name
+
+
+def effective_label(project):
+    """저장된 label(사용자가 직접 지정한 축약명)이 있으면 그것을, 없으면 키워드 매칭 결과를 쓴다."""
+    return (project.get("label") or "").strip() or short_label(project.get("project_name", ""))
+
 
 def _ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -61,12 +90,77 @@ def load_history():
     return hist
 
 
+def _dedupe_by_label(projects):
+    """같은 축약명으로 매칭되는 과제(표기만 다른 중복)는 먼저 나온 것만 남긴다."""
+    seen_labels = set()
+    deduped = []
+    for p in projects:
+        label = effective_label(p)
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+        deduped.append(p)
+    return deduped
+
+
 def load_projects():
     projects = _load_json(PROJECTS_PATH, None)
     if projects is None:
         projects = list(DEFAULT_PROJECTS)
         _save_json(PROJECTS_PATH, projects)
-    return projects
+    deduped = _dedupe_by_label(projects)
+    if len(deduped) != len(projects):
+        _save_json(PROJECTS_PATH, deduped)
+    return deduped
+
+
+def _build_project_entry(agency, org, project_name, label=None):
+    project_name = (project_name or "").strip()
+    if not project_name:
+        raise ValueError("project_name is required")
+    entry = {"agency": (agency or "").strip(), "org": (org or "").strip(), "project_name": project_name}
+    label = (label or "").strip()
+    if label:
+        entry["label"] = label
+    return entry
+
+
+def _upsert_project(entry, exclude_name=None):
+    """entry를 맨 앞에 추가한다. 같은 축약명으로 매칭되는 기존 과제나 exclude_name에
+    해당하는 과제(수정 대상 원본)가 있으면 제거해서 드롭다운에 중복이 남지 않게 한다.
+    """
+    new_label = effective_label(entry)
+    projects = [
+        p
+        for p in load_projects()
+        if p.get("project_name") != exclude_name and effective_label(p) != new_label
+    ]
+    projects.insert(0, entry)
+    projects = projects[:MAX_PROJECTS]
+    _save_json(PROJECTS_PATH, projects)
+    return entry
+
+
+def add_project(agency, org, project_name, label=None):
+    """과제 정보 영역에서 사용자가 직접 새 과제를 추가할 때 호출한다."""
+    entry = _build_project_entry(agency, org, project_name, label)
+    return _upsert_project(entry)
+
+
+def update_project(original_name, agency, org, project_name, label=None):
+    """기존 과제(project_name == original_name)를 새 내용으로 교체한다."""
+    entry = _build_project_entry(agency, org, project_name, label)
+    return _upsert_project(entry, exclude_name=original_name)
+
+
+def delete_project(project_name):
+    """project_name과 일치하는 과제를 목록에서 제거한다. 제거됐으면 True를 반환한다."""
+    projects = load_projects()
+    remaining = [p for p in projects if p.get("project_name") != project_name]
+    if len(remaining) == len(projects):
+        return False
+    _save_json(PROJECTS_PATH, remaining)
+    return True
 
 
 def _move_to_front(items, value):

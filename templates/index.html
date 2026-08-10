@@ -153,7 +153,7 @@
       <div class="grid">
         <div>
           <label>업체명 *</label>
-          <input type="text" name="company" list="companyList" required placeholder="예) 주식회사 다임">
+          <input type="text" name="company" id="companyInput" list="companyList" required placeholder="예) 주식회사 다임">
           <datalist id="companyList">
             {% for v in history.company %}<option value="{{ v }}">{% endfor %}
           </datalist>
@@ -192,7 +192,7 @@
       <div class="grid full">
         <div>
           <label>내용 (제목) *</label>
-          <input type="text" name="title" list="titleList" required placeholder="예) 자동화 과제 자재 구매의 건">
+          <input type="text" name="title" id="titleInput" list="titleList" required placeholder="예) 자동화 과제 자재 구매의 건">
           <datalist id="titleList">
             {% for v in history.title %}<option value="{{ v }}">{% endfor %}
           </datalist>
@@ -221,9 +221,40 @@
         <select id="projectPreset">
           <option value="">직접 입력</option>
           {% for p in projects %}
-          <option value="{{ loop.index0 }}">{{ p.project_name }}</option>
+          <option value="{{ loop.index0 }}">{{ p.label }}</option>
           {% endfor %}
         </select>
+        <button type="button" class="small" id="toggleAddProjectBtn" style="margin-left:8px;">+ 새 과제 추가</button>
+        <button type="button" class="small" id="editProjectBtn" style="margin-left:4px;">수정</button>
+        <button type="button" class="small" id="deleteProjectBtn" style="margin-left:4px;">삭제</button>
+      </div>
+      <div id="addProjectPanel" style="display:none; margin:10px 0; padding:12px; border:1px dashed var(--border); border-radius:8px;">
+        <div style="font-weight:600; font-size:12.5px; margin-bottom:8px;" id="addProjectPanelTitle">새 과제 추가</div>
+        <div class="grid">
+          <div>
+            <label>축약명 (드롭다운 표시용, 비우면 자동 인식)</label>
+            <input type="text" id="newProjectLabel" placeholder="예) 로봇">
+          </div>
+          <div>
+            <label>중앙행정기관</label>
+            <input type="text" id="newProjectAgency" placeholder="예) 농림축산식품부">
+          </div>
+        </div>
+        <div class="grid" style="margin-top:12px;">
+          <div>
+            <label>전문기관</label>
+            <input type="text" id="newProjectOrg" placeholder="예) 농림식품기술기획평가원">
+          </div>
+          <div>
+            <label>과제명 (필수)</label>
+            <input type="text" id="newProjectName" placeholder="예) 새 과제명 전체를 입력">
+          </div>
+        </div>
+        <div class="row-buttons">
+          <button type="button" class="small" id="saveNewProjectBtn">추가</button>
+          <button type="button" class="small" id="cancelNewProjectBtn">취소</button>
+        </div>
+        <div id="newProjectMsg" style="font-size:12px;margin-top:6px;"></div>
       </div>
       <div class="grid">
         <div>
@@ -301,6 +332,16 @@
     <div style="background:#fff;max-width:1000px;margin:40px auto;border-radius:10px;padding:20px 24px;max-height:85vh;overflow:auto;">
       <h2 style="font-size:16px;margin:0 0 10px;">PDF에서 품목 불러오기</h2>
       <div id="pdfWarnings" style="color:#b42318;font-size:12.5px;margin-bottom:10px;"></div>
+      <div style="display:flex;gap:12px;">
+        <div id="pdfCompanyRow" style="display:none;margin-bottom:12px;flex:1;">
+          <label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:4px;">업체명 (PDF에서 인식, 필요하면 수정하세요)</label>
+          <input type="text" id="pdfCompanyInput" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+        </div>
+        <div id="pdfTitleRow" style="display:none;margin-bottom:12px;flex:1;">
+          <label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:4px;">내용(제목) (PDF에서 인식, 필요하면 수정하세요)</label>
+          <input type="text" id="pdfTitleInput" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+        </div>
+      </div>
       <div style="display:flex;gap:16px;">
         <div id="pdfImagePane" style="flex:1;overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:6px;padding:6px;"></div>
         <div style="flex:1;overflow:auto;max-height:60vh;">
@@ -353,6 +394,165 @@ document.getElementById('projectPreset').addEventListener('change', (e) => {
   document.getElementById('agencyInput').value = p.agency;
   document.getElementById('orgInput').value = p.org;
   document.getElementById('projectNameInput').value = p.project_name;
+});
+
+function refreshProjectOptions() {
+  const select = document.getElementById('projectPreset');
+  select.querySelectorAll('option:not([value=""])').forEach(o => o.remove());
+  PROJECTS.forEach((p, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = p.label;
+    select.appendChild(opt);
+  });
+
+  const projectNameList = document.getElementById('projectNameList');
+  projectNameList.innerHTML = '';
+  PROJECTS.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.project_name;
+    projectNameList.appendChild(opt);
+  });
+}
+
+let editingOriginalName = null;
+
+function selectedProject() {
+  const select = document.getElementById('projectPreset');
+  if (select.value === '') return null;
+  return PROJECTS[parseInt(select.value, 10)];
+}
+
+function clearNewProjectFields() {
+  document.getElementById('newProjectLabel').value = '';
+  document.getElementById('newProjectAgency').value = '';
+  document.getElementById('newProjectOrg').value = '';
+  document.getElementById('newProjectName').value = '';
+}
+
+function openAddProjectPanel() {
+  editingOriginalName = null;
+  document.getElementById('addProjectPanelTitle').textContent = '새 과제 추가';
+  document.getElementById('saveNewProjectBtn').textContent = '추가';
+  clearNewProjectFields();
+  document.getElementById('newProjectMsg').textContent = '';
+  document.getElementById('addProjectPanel').style.display = 'block';
+}
+
+function closeAddProjectPanel() {
+  document.getElementById('addProjectPanel').style.display = 'none';
+  document.getElementById('newProjectMsg').textContent = '';
+  editingOriginalName = null;
+}
+
+document.getElementById('toggleAddProjectBtn').addEventListener('click', () => {
+  const panel = document.getElementById('addProjectPanel');
+  if (panel.style.display !== 'none' && editingOriginalName === null) {
+    closeAddProjectPanel();
+  } else {
+    openAddProjectPanel();
+  }
+});
+
+document.getElementById('editProjectBtn').addEventListener('click', () => {
+  const p = selectedProject();
+  if (!p) {
+    alert('먼저 수정할 과제를 선택해주세요.');
+    return;
+  }
+  editingOriginalName = p.project_name;
+  document.getElementById('addProjectPanelTitle').textContent = '과제 수정';
+  document.getElementById('saveNewProjectBtn').textContent = '수정 저장';
+  document.getElementById('newProjectLabel').value = p.label || '';
+  document.getElementById('newProjectAgency').value = p.agency || '';
+  document.getElementById('newProjectOrg').value = p.org || '';
+  document.getElementById('newProjectName').value = p.project_name || '';
+  document.getElementById('newProjectMsg').textContent = '';
+  document.getElementById('addProjectPanel').style.display = 'block';
+});
+
+document.getElementById('deleteProjectBtn').addEventListener('click', async () => {
+  const select = document.getElementById('projectPreset');
+  const p = selectedProject();
+  if (!p) {
+    alert('먼저 삭제할 과제를 선택해주세요.');
+    return;
+  }
+  if (!confirm(`"${p.label}" 과제를 목록에서 삭제할까요?`)) return;
+
+  const fd = new FormData();
+  fd.append('project_name', p.project_name);
+  try {
+    const res = await fetch('/delete_project', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || '삭제에 실패했습니다.');
+      return;
+    }
+    const idx = PROJECTS.findIndex(x => x.project_name === p.project_name);
+    if (idx >= 0) PROJECTS.splice(idx, 1);
+    refreshProjectOptions();
+    select.value = '';
+    document.getElementById('agencyInput').value = '';
+    document.getElementById('orgInput').value = '';
+    document.getElementById('projectNameInput').value = '';
+    if (editingOriginalName === p.project_name) closeAddProjectPanel();
+  } catch (err) {
+    alert('삭제 중 오류가 발생했습니다.');
+  }
+});
+
+document.getElementById('cancelNewProjectBtn').addEventListener('click', () => {
+  closeAddProjectPanel();
+});
+
+document.getElementById('saveNewProjectBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('newProjectMsg');
+  const projectName = document.getElementById('newProjectName').value.trim();
+  if (!projectName) {
+    msg.style.color = '#b42318';
+    msg.textContent = '과제명을 입력해주세요.';
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('label', document.getElementById('newProjectLabel').value.trim());
+  fd.append('agency', document.getElementById('newProjectAgency').value.trim());
+  fd.append('org', document.getElementById('newProjectOrg').value.trim());
+  fd.append('project_name', projectName);
+  const isEdit = editingOriginalName !== null;
+  if (isEdit) fd.append('original_name', editingOriginalName);
+
+  try {
+    const res = await fetch(isEdit ? '/update_project' : '/add_project', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.style.color = '#b42318';
+      msg.textContent = data.error || (isEdit ? '수정에 실패했습니다.' : '추가에 실패했습니다.');
+      return;
+    }
+
+    if (isEdit) {
+      const origIdx = PROJECTS.findIndex(p => p.project_name === editingOriginalName);
+      if (origIdx >= 0) PROJECTS.splice(origIdx, 1);
+    }
+    const existingIdx = PROJECTS.findIndex(p => p.label === data.label);
+    if (existingIdx >= 0) PROJECTS.splice(existingIdx, 1);
+    PROJECTS.unshift(data);
+    refreshProjectOptions();
+
+    document.getElementById('projectPreset').value = 0;
+    document.getElementById('agencyInput').value = data.agency;
+    document.getElementById('orgInput').value = data.org;
+    document.getElementById('projectNameInput').value = data.project_name;
+
+    msg.style.color = '#2f6f4f';
+    msg.textContent = isEdit ? '수정되었습니다.' : '추가되었습니다.';
+    closeAddProjectPanel();
+  } catch (err) {
+    msg.style.color = '#b42318';
+    msg.textContent = '처리 중 오류가 발생했습니다.';
+  }
 });
 
 function addRow(prefill) {
@@ -494,6 +694,24 @@ function openPdfModal(result) {
   pdfDraftBody.innerHTML = '';
   pdfImagePane.innerHTML = '';
   pdfWarnings.textContent = (result.warnings || []).join(' ');
+  const companyRow = document.getElementById('pdfCompanyRow');
+  const companyInput = document.getElementById('pdfCompanyInput');
+  if (result.company) {
+    companyInput.value = result.company;
+    companyRow.style.display = 'block';
+  } else {
+    companyInput.value = '';
+    companyRow.style.display = 'none';
+  }
+  const titleRow = document.getElementById('pdfTitleRow');
+  const titleInputPreview = document.getElementById('pdfTitleInput');
+  if (result.title) {
+    titleInputPreview.value = result.title;
+    titleRow.style.display = 'block';
+  } else {
+    titleInputPreview.value = '';
+    titleRow.style.display = 'none';
+  }
   result.page_images.forEach(b64 => {
     const img = document.createElement('img');
     img.src = 'data:image/png;base64,' + b64;
@@ -527,6 +745,19 @@ function applyDraftItems(mode) {
     itemsBody.innerHTML = '';
   }
   draftItems.forEach(item => addRow(item));
+
+  const pdfCompany = document.getElementById('pdfCompanyInput').value.trim();
+  const companyInput = document.getElementById('companyInput');
+  if (pdfCompany && !companyInput.value.trim()) {
+    companyInput.value = pdfCompany;
+  }
+
+  const pdfTitle = document.getElementById('pdfTitleInput').value.trim();
+  const titleInput = document.getElementById('titleInput');
+  if (pdfTitle && !titleInput.value.trim()) {
+    titleInput.value = pdfTitle;
+  }
+
   closePdfModal();
   recalc();
 }

@@ -45,9 +45,9 @@ def test_all_columns_regression():
     ws = wb.worksheets[0]
 
     assert _header_labels(ws) == {
-        "C": "품목", "G": "규격", "J": "단위", "L": "수량", "N": "단가", "Q": "공급가", "T": "부가세",
+        "B": "품목", "H": "규격", "L": "단위", "O": "수량", "R": "단가", "V": "공급가", "Z": "부가세",
     }
-    assert _header_merges(ws) == sorted([(3, 6), (7, 9), (10, 11), (12, 13), (14, 16), (17, 19), (20, 22)])
+    assert _header_merges(ws) == sorted([(2, 7), (8, 11), (12, 14), (15, 17), (18, 21), (22, 25), (26, 29)])
     print("OK: test_all_columns_regression")
 
 
@@ -63,10 +63,10 @@ def test_spec_dropped_compacts_header():
     assert set(labels.values()) == {"품목", "단위", "수량", "단가", "공급가", "부가세"}
 
     merges = _header_merges(ws)
-    assert merges[0][0] == 3
-    assert merges[-1][1] == 22
+    assert merges[0][0] == 2
+    assert merges[-1][1] == 29
     total_span = sum(end - start + 1 for start, end in merges)
-    assert total_span == 20
+    assert total_span == 28
     print("OK: test_spec_dropped_compacts_header")
 
 
@@ -95,10 +95,10 @@ def test_total_row_boundary_matches_supply_start():
         (m.min_col, m.max_col) for m in ws.merged_cells.ranges
         if m.min_row == total_row and m.max_row == total_row
     ]
-    label_merge = next(mc for mc in row_merges if mc[0] == 3)
+    label_merge = next(mc for mc in row_merges if mc[0] == TABLE_START_COL)
     amount_merge = next(mc for mc in row_merges if mc[0] == supply_start)
     assert label_merge[1] == supply_start - 1
-    assert amount_merge[1] == 22
+    assert amount_merge[1] == TABLE_END_COL
     print("OK: test_total_row_boundary_matches_supply_start")
 
 
@@ -110,7 +110,7 @@ def test_supply_direct_entry_when_price_off():
     ws = wb.worksheets[0]
     layout = _compute_column_layout({"use_spec": True, "use_unit": True, "use_qty": False, "use_price": False})
     supply_letter = get_column_letter(layout["supply"][0])
-    assert ws[f"{supply_letter}{24}"].value == 12345
+    assert ws[f"{supply_letter}{FIRST_ITEM_ROW}"].value == 12345
     print("OK: test_supply_direct_entry_when_price_off")
 
 
@@ -132,10 +132,22 @@ def test_qty_price_supply_cells_populated():
     print("OK: test_qty_price_supply_cells_populated")
 
 
+def test_too_many_items_raises():
+    data = dict(BASE_DATA)
+    data["items"] = [{"name": f"품목{i+1}", "unit": "EA", "qty": 1, "price": 100} for i in range(10)]
+    try:
+        build_expense_report(data)
+    except ValueError:
+        print("OK: test_too_many_items_raises")
+        return
+    raise AssertionError("expected ValueError for too many items")
+
+
 if __name__ == "__main__":
     test_all_columns_regression()
     test_spec_dropped_compacts_header()
     test_total_row_boundary_matches_supply_start()
     test_supply_direct_entry_when_price_off()
     test_qty_price_supply_cells_populated()
+    test_too_many_items_raises()
     print("ALL PASSED")

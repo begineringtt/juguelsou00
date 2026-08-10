@@ -8,6 +8,7 @@ from pdf_item_parser import (
     find_header_row, score_table, map_table_columns, extract_items_from_table,
     resolve_duplicate_price_columns, clean_item_rows, apply_hierarchical_prefix,
     extract_paragraph_fallback, render_page_images, parse_pdf_items,
+    extract_company_name, extract_title,
 )
 
 SAMPLE_DIR = r"D:\claude_personal\setting_01\PDF_read"
@@ -353,6 +354,8 @@ def test_parse_pdf_items_normal_table_case():
     assert result["items"][0]["price"] == 660000.0
     assert result["warnings"] == []
     assert len(result["page_images"]) == 1
+    assert result["company"] == "한수과학"
+    assert result["title"] is None
     print("OK: test_parse_pdf_items_normal_table_case")
 
 
@@ -365,6 +368,8 @@ def test_parse_pdf_items_hierarchical_case():
     assert "온실제어 INTERFACE - 외함" in names
     assert "제어 CONTROLLER - PLC+TOUCH" in names
     assert "배선 자재 - 전선(F-CV)" in names
+    assert result["company"] == "아이온이엔지"
+    assert result["title"] == "환경제어 계측 자재 대전"
     print("OK: test_parse_pdf_items_hierarchical_case")
 
 
@@ -376,6 +381,8 @@ def test_parse_pdf_items_duplicate_header_case():
     by_name = {it["name"]: it for it in result["items"]}
     assert by_name["HONEYWELL - DR100GF"]["price"] == 520000.0
     assert by_name["HONEYWELL - DR100GF"]["qty"] == 2.0
+    assert result["company"] == "한열사"
+    assert result["title"] is None
     print("OK: test_parse_pdf_items_duplicate_header_case")
 
 
@@ -388,7 +395,74 @@ def test_parse_pdf_items_no_table_fallback_case():
     assert result["items"][0]["name"] == "AL- Ingot"
     assert result["items"][0]["price"] == 6250000.0
     assert result["warnings"]
+    assert result["company"] == "㈜코랄인터내셔널"
+    assert result["title"] == "AL Ingot 견적서 발송의 건"
     print("OK: test_parse_pdf_items_no_table_fallback_case")
+
+
+def test_extract_company_name_various_samples():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_extract_company_name_various_samples (no sample dir)")
+        return
+    cases = {
+        "2. 견적서_세화볼트.pdf": "세화볼트",
+        "2. 그린플러스_광센서_견적서.pdf": "쉘파스페이스",
+        "견적서_20260721(그린플러스_IR Cut_8월).pdf": "마이크로웍스솔루션즈 주식회사",
+        "견적서_일신_북미.pdf": "일신폴리캠",
+        "2. 견적서.pdf": None,
+    }
+    for filename, expected in cases.items():
+        with open(os.path.join(SAMPLE_DIR, filename), "rb") as f:
+            text_source = f.read()
+        result = parse_pdf_items(text_source)
+        assert result["company"] == expected, f"{filename}: expected {expected!r}, got {result['company']!r}"
+    print("OK: test_extract_company_name_various_samples")
+
+
+def test_extract_company_name_excludes_our_own_company():
+    text = "受信處 : ㈜그린플러스 貴下\n(주)아이온이엔지\n대전광역시대덕구선비마을로6번길15-8"
+    assert extract_company_name(text) == "아이온이엔지"
+
+    text2 = "회 사 명 : (주)그린플러스\n담 당 :\n(주)한 열 사"
+    assert extract_company_name(text2) == "한열사"
+
+    text3 = "수신: 그린플러스 귀하\n아무 내용도 없음"
+    assert extract_company_name(text3) is None
+    print("OK: test_extract_company_name_excludes_our_own_company")
+
+
+def test_extract_title_various_samples():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_extract_title_various_samples (no sample dir)")
+        return
+    cases = {
+        "2. 견적서.pdf": "온실복합환경계측 자재",
+        "견적서_일신_북미.pdf": "폴리카보네이트 복층판",
+        "대금청구서-엽채류동 modbusTCP 작업 (2).pdf": "당진 K-Farm 엽채류동 modbusTCP 작업",
+        "2. 견적서_세화볼트.pdf": None,
+        "견적서_20260721(그린플러스_IR Cut_8월).pdf": None,
+    }
+    for filename, expected in cases.items():
+        with open(os.path.join(SAMPLE_DIR, filename), "rb") as f:
+            text_source = f.read()
+        result = parse_pdf_items(text_source)
+        assert result["title"] == expected, f"{filename}: expected {expected!r}, got {result['title']!r}"
+    print("OK: test_extract_title_various_samples")
+
+
+def test_extract_title_handles_korean_hanja_and_english_labels():
+    assert extract_title("물품명 : 온실복합환경계측 자재") == "온실복합환경계측 자재"
+    assert extract_title("見 積 名 : 환경제어 계측 자재") == "환경제어 계측 자재"
+    assert extract_title("SUBJECT: Greenhouse control materials") == "Greenhouse control materials"
+    assert extract_title("공사명/품명 규격 수량 단위 단가 금액 비 고") is None
+    assert extract_title("DESCRIPTION SIZE Q'TY UNIT UNIT PRICE AMOUNT REMARK") is None
+    print("OK: test_extract_title_handles_korean_hanja_and_english_labels")
+
+
+def test_extract_title_truncates_at_trailing_contact_info():
+    text = "내 용 : 당진 K-Farm 엽채류동 modbusTCP 작업 연락처 : (T)042-631-2204 (F)042-639-2204"
+    assert extract_title(text) == "당진 K-Farm 엽채류동 modbusTCP 작업"
+    print("OK: test_extract_title_truncates_at_trailing_contact_info")
 
 
 if __name__ == "__main__":
@@ -427,4 +501,9 @@ if __name__ == "__main__":
     test_parse_pdf_items_hierarchical_case()
     test_parse_pdf_items_duplicate_header_case()
     test_parse_pdf_items_no_table_fallback_case()
+    test_extract_company_name_various_samples()
+    test_extract_company_name_excludes_our_own_company()
+    test_extract_title_various_samples()
+    test_extract_title_handles_korean_hanja_and_english_labels()
+    test_extract_title_truncates_at_trailing_contact_info()
     print("ALL PASSED")

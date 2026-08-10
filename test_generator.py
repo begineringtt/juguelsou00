@@ -1,6 +1,5 @@
-import io
 import openpyxl
-from generator import build_expense_report
+from generator import build_expense_report, ITEM_HEADER_ROW, LAST_USABLE_ROW
 
 BASE_DATA = {
     "company": "주식회사 테스트",
@@ -34,26 +33,22 @@ def inspect(n):
     print("dims:", ws.dimensions)
     print("merges around item area:")
     for mc in sorted(ws.merged_cells.ranges, key=lambda m: (m.min_row, m.min_col)):
-        if 22 <= mc.min_row <= 33:
+        if ITEM_HEADER_ROW <= mc.min_row <= LAST_USABLE_ROW + 1:
             print(" ", mc)
     print("formulas:")
-    for r in range(23, 33):
+    for r in range(ITEM_HEADER_ROW, LAST_USABLE_ROW + 1):
         vals = []
-        for col in ["C", "G", "J", "L", "N", "Q", "T"]:
+        for col in ["B", "H", "L", "O", "R", "V", "Z"]:
             v = ws[f"{col}{r}"].value
             if v is not None:
                 vals.append(f"{col}{r}={v!r}")
         if vals:
             print(" ", " | ".join(vals))
-    print("S8:", ws["S8"].value, "D8:", ws["D8"].value)
-    for coord in ["A31", "N31"]:
-        pass
-    # find footer text wherever it landed
-    for row in ws.iter_rows():
-        for cell in row:
-            if cell.value == "[GP-A-001]" or cell.value == "주식회사 그린플러스":
-                print("footer:", cell.coordinate, cell.value)
+    print("S5:", ws["S5"].value, "D5:", ws["D5"].value)
+    # 고정 위치 결재란/각주가 그대로 남아있는지 확인
+    for coord in ["A31", "M31"]:
+        print(f"{coord}:", ws[coord].value)
 
 
-for n in [1, 2, 3, 5]:
+for n in [1, 2, 3, 5, 9]:
     inspect(n)

@@ -4,4 +4,8 @@ data/history.json
 data/projects.json
 build/
 dist/
-*.spec
+output/
+.claude/
+.superpowers/
+*.lnk
+base_template_v1_backup.xlsx
