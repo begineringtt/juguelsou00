@@ -137,12 +137,26 @@ def _clean_title_candidate(text):
     return text
 
 
+_TITLE_CASE_SUFFIX = "의 건"
+
+
+def _ensure_case_suffix(title):
+    """지출결의서 "내용" 칸 관례대로 "~의 건"으로 끝나도록 붙여준다.
+
+    이미 "건"으로 끝나는 문구(예: "...발송의 건")는 중복으로 붙지 않게 둔다.
+    """
+    if title.rstrip(" .!").endswith("건"):
+        return title
+    return f"{title}{_TITLE_CASE_SUFFIX}"
+
+
 def extract_title(text):
     """견적서 전체 텍스트에서 "내용(제목)"으로 옮겨 적을 문구를 찾는다.
 
     "내용"/"물품명"/"견적명"/"제목"(한문 표기 見積名/品名, 영문 SUBJECT/TITLE 포함)
     라벨 뒤에 콜론(:/：)이 붙은 값만 인정한다 - 콜론이 없으면 품목 표의 열 제목
     ("DESCRIPTION" 등)과 헷갈릴 수 있어서다. 못 찾으면 None (직접 입력하도록 둔다).
+    지출결의서 관례에 맞춰 끝에 "의 건"을 붙여서 반환한다.
     """
     for line in text.split("\n"):
         for pattern in _TITLE_LABEL_PATTERNS:
@@ -151,7 +165,7 @@ def extract_title(text):
                 continue
             value = _clean_title_candidate(m.group(1))
             if value:
-                return value
+                return _ensure_case_suffix(value)
     return None
 
 

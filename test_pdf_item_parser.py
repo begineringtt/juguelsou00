@@ -369,7 +369,7 @@ def test_parse_pdf_items_hierarchical_case():
     assert "제어 CONTROLLER - PLC+TOUCH" in names
     assert "배선 자재 - 전선(F-CV)" in names
     assert result["company"] == "아이온이엔지"
-    assert result["title"] == "환경제어 계측 자재 대전"
+    assert result["title"] == "환경제어 계측 자재 대전의 건"
     print("OK: test_parse_pdf_items_hierarchical_case")
 
 
@@ -436,9 +436,9 @@ def test_extract_title_various_samples():
         print("SKIP: test_extract_title_various_samples (no sample dir)")
         return
     cases = {
-        "2. 견적서.pdf": "온실복합환경계측 자재",
-        "견적서_일신_북미.pdf": "폴리카보네이트 복층판",
-        "대금청구서-엽채류동 modbusTCP 작업 (2).pdf": "당진 K-Farm 엽채류동 modbusTCP 작업",
+        "2. 견적서.pdf": "온실복합환경계측 자재의 건",
+        "견적서_일신_북미.pdf": "폴리카보네이트 복층판의 건",
+        "대금청구서-엽채류동 modbusTCP 작업 (2).pdf": "당진 K-Farm 엽채류동 modbusTCP 작업의 건",
         "2. 견적서_세화볼트.pdf": None,
         "견적서_20260721(그린플러스_IR Cut_8월).pdf": None,
     }
@@ -451,9 +451,9 @@ def test_extract_title_various_samples():
 
 
 def test_extract_title_handles_korean_hanja_and_english_labels():
-    assert extract_title("물품명 : 온실복합환경계측 자재") == "온실복합환경계측 자재"
-    assert extract_title("見 積 名 : 환경제어 계측 자재") == "환경제어 계측 자재"
-    assert extract_title("SUBJECT: Greenhouse control materials") == "Greenhouse control materials"
+    assert extract_title("물품명 : 온실복합환경계측 자재") == "온실복합환경계측 자재의 건"
+    assert extract_title("見 積 名 : 환경제어 계측 자재") == "환경제어 계측 자재의 건"
+    assert extract_title("SUBJECT: Greenhouse control materials") == "Greenhouse control materials의 건"
     assert extract_title("공사명/품명 규격 수량 단위 단가 금액 비 고") is None
     assert extract_title("DESCRIPTION SIZE Q'TY UNIT UNIT PRICE AMOUNT REMARK") is None
     print("OK: test_extract_title_handles_korean_hanja_and_english_labels")
@@ -461,8 +461,13 @@ def test_extract_title_handles_korean_hanja_and_english_labels():
 
 def test_extract_title_truncates_at_trailing_contact_info():
     text = "내 용 : 당진 K-Farm 엽채류동 modbusTCP 작업 연락처 : (T)042-631-2204 (F)042-639-2204"
-    assert extract_title(text) == "당진 K-Farm 엽채류동 modbusTCP 작업"
+    assert extract_title(text) == "당진 K-Farm 엽채류동 modbusTCP 작업의 건"
     print("OK: test_extract_title_truncates_at_trailing_contact_info")
+
+
+def test_extract_title_does_not_duplicate_existing_case_suffix():
+    assert extract_title("제 목 : 자재 구매의 건") == "자재 구매의 건"
+    print("OK: test_extract_title_does_not_duplicate_existing_case_suffix")
 
 
 if __name__ == "__main__":
@@ -506,4 +511,5 @@ if __name__ == "__main__":
     test_extract_title_various_samples()
     test_extract_title_handles_korean_hanja_and_english_labels()
     test_extract_title_truncates_at_trailing_contact_info()
+    test_extract_title_does_not_duplicate_existing_case_suffix()
     print("ALL PASSED")
