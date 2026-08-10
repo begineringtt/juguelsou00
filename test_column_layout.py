@@ -11,27 +11,27 @@ def _letters(layout, key):
 def test_all_columns_matches_original_layout():
     flags = {"use_spec": True, "use_unit": True, "use_qty": True, "use_price": True}
     layout = _compute_column_layout(flags)
-    assert _letters(layout, "name") == ("B", "G")
-    assert _letters(layout, "spec") == ("H", "K")
-    assert _letters(layout, "unit") == ("L", "N")
-    assert _letters(layout, "qty") == ("O", "Q")
-    assert _letters(layout, "price") == ("R", "U")
-    assert _letters(layout, "supply") == ("V", "Y")
-    assert _letters(layout, "vat") == ("Z", "AC")
+    assert _letters(layout, "name") == ("B", "F")
+    assert _letters(layout, "spec") == ("G", "J")
+    assert _letters(layout, "unit") == ("K", "M")
+    assert _letters(layout, "qty") == ("N", "P")
+    assert _letters(layout, "price") == ("Q", "T")
+    assert _letters(layout, "supply") == ("U", "X")
+    assert _letters(layout, "vat") == ("Y", "AB")
     print("OK: test_all_columns_matches_original_layout")
 
 
-def test_spec_dropped_fills_28_columns():
+def test_spec_dropped_fills_27_columns():
     flags = {"use_spec": False, "use_unit": True, "use_qty": True, "use_price": True}
     layout = _compute_column_layout(flags)
     assert "spec" not in layout
     assert set(layout.keys()) == {"name", "unit", "qty", "price", "supply", "vat"}
     ranges = sorted((v[0], v[1]) for v in layout.values())
     assert ranges[0][0] == 2
-    assert ranges[-1][1] == 29
+    assert ranges[-1][1] == 28
     for i in range(len(ranges) - 1):
         assert ranges[i][1] + 1 == ranges[i + 1][0]
-    print("OK: test_spec_dropped_fills_28_columns")
+    print("OK: test_spec_dropped_fills_27_columns")
 
 
 def test_all_optional_columns_dropped():
@@ -39,8 +39,8 @@ def test_all_optional_columns_dropped():
     layout = _compute_column_layout(flags)
     assert set(layout.keys()) == {"name", "supply", "vat"}
     assert _letters(layout, "name") == ("B", "L")
-    assert _letters(layout, "supply") == ("M", "U")
-    assert _letters(layout, "vat") == ("V", "AC")
+    assert _letters(layout, "supply") == ("M", "T")
+    assert _letters(layout, "vat") == ("U", "AB")
     print("OK: test_all_optional_columns_dropped")
 
 
@@ -53,7 +53,7 @@ def test_infer_flags_from_items():
 
 if __name__ == "__main__":
     test_all_columns_matches_original_layout()
-    test_spec_dropped_fills_28_columns()
+    test_spec_dropped_fills_27_columns()
     test_all_optional_columns_dropped()
     test_infer_flags_from_items()
     print("ALL PASSED")

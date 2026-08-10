@@ -45,9 +45,9 @@ def test_all_columns_regression():
     ws = wb.worksheets[0]
 
     assert _header_labels(ws) == {
-        "B": "품목", "H": "규격", "L": "단위", "O": "수량", "R": "단가", "V": "공급가", "Z": "부가세",
+        "B": "품목", "G": "규격", "K": "단위", "N": "수량", "Q": "단가", "U": "공급가", "Y": "부가세",
     }
-    assert _header_merges(ws) == sorted([(2, 7), (8, 11), (12, 14), (15, 17), (18, 21), (22, 25), (26, 29)])
+    assert _header_merges(ws) == sorted([(2, 6), (7, 10), (11, 13), (14, 16), (17, 20), (21, 24), (25, 28)])
     print("OK: test_all_columns_regression")
 
 
@@ -64,9 +64,9 @@ def test_spec_dropped_compacts_header():
 
     merges = _header_merges(ws)
     assert merges[0][0] == 2
-    assert merges[-1][1] == 29
+    assert merges[-1][1] == 28
     total_span = sum(end - start + 1 for start, end in merges)
-    assert total_span == 28
+    assert total_span == 27
     print("OK: test_spec_dropped_compacts_header")
 
 

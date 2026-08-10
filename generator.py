@@ -42,14 +42,15 @@ PROJECT_INFO_ROWS = {
     "execution_note": 14,
 }
 PROJECT_INFO_START_COL = 2  # B
+PROJECT_INFO_END_COL = 29   # AC
 
 ITEM_HEADER_ROW = 16
 FIRST_ITEM_ROW = 17
 LAST_USABLE_ROW = 27  # 이 아래(28행)부터는 재무부서 결재란이 고정되어 있어 침범 불가
 
 TABLE_START_COL = 2   # B
-TABLE_END_COL = 29    # AC
-TABLE_WIDTH = TABLE_END_COL - TABLE_START_COL + 1  # 28
+TABLE_END_COL = 28    # AB
+TABLE_WIDTH = TABLE_END_COL - TABLE_START_COL + 1  # 27
 
 # 품목 헤더(1) + 이하 여백(1) + 합계 금액(1) 을 제외한 나머지가 품목 최대 개수
 MAX_ITEM_ROWS = LAST_USABLE_ROW - FIRST_ITEM_ROW - 1  # 9
@@ -206,8 +207,8 @@ def _rebuild_item_section(ws, items):
 
 
 def _write_project_info_line(ws, row, text):
-    table_end_letter = get_column_letter(TABLE_END_COL)
-    ws.merge_cells(f"B{row}:{table_end_letter}{row}")
+    end_letter = get_column_letter(PROJECT_INFO_END_COL)
+    ws.merge_cells(f"B{row}:{end_letter}{row}")
     cell = ws.cell(row=row, column=PROJECT_INFO_START_COL)
     cell.value = text
     cell.font = FONT_BOLD

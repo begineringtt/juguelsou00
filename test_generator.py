@@ -38,7 +38,7 @@ def inspect(n):
     print("formulas:")
     for r in range(ITEM_HEADER_ROW, LAST_USABLE_ROW + 1):
         vals = []
-        for col in ["B", "H", "L", "O", "R", "V", "Z"]:
+        for col in ["B", "G", "K", "N", "Q", "U", "Y"]:
             v = ws[f"{col}{r}"].value
             if v is not None:
                 vals.append(f"{col}{r}={v!r}")
