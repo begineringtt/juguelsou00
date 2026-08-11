@@ -3,7 +3,7 @@ from openpyxl.utils import get_column_letter
 
 from generator import (
     ITEM_HEADER_ROW, TABLE_START_COL, TABLE_END_COL, FIRST_ITEM_ROW, BASE_ITEM_ROWS,
-    FOOTER_BLOCK_START_ROW, _compute_column_layout,
+    FOOTER_BLOCK_START_ROW, FOOTER_BLOCK_MAX_COL, _compute_column_layout,
 )
 from generator import build_expense_report
 
@@ -199,6 +199,27 @@ def test_many_items_inserts_rows_and_pushes_footer_block_down():
     print("OK: test_many_items_inserts_rows_and_pushes_footer_block_down")
 
 
+def test_many_items_keeps_outer_frame_border_consistent():
+    """품목이 넘쳐서 원본 캔버스(11~27행) 밖으로 나간 행도, 안쪽 행과 똑같이
+    A열/AC열 바깥 테두리(medium)가 이어지는지 확인한다.
+    """
+    n = BASE_ITEM_ROWS + 6
+    data = dict(BASE_DATA)
+    data["items"] = [{"name": f"품목{i+1}", "unit": "EA", "qty": 1, "price": 100} for i in range(n)]
+    buf = build_expense_report(data)
+    wb = openpyxl.load_workbook(buf)
+    ws = wb.worksheets[0]
+
+    inside_canvas_row = FIRST_ITEM_ROW + 1          # 원본 11~27행 범위 안
+    overflow_row = FIRST_ITEM_ROW + BASE_ITEM_ROWS + 2  # 원본 범위를 넘어간 품목 행
+    for row in (ITEM_HEADER_ROW, inside_canvas_row, overflow_row):
+        left = ws.cell(row=row, column=1).border.left
+        right = ws.cell(row=row, column=FOOTER_BLOCK_MAX_COL).border.right
+        assert left and left.style == "medium", f"row {row} missing left frame border"
+        assert right and right.style == "medium", f"row {row} missing right frame border"
+    print("OK: test_many_items_keeps_outer_frame_border_consistent")
+
+
 if __name__ == "__main__":
     test_all_columns_regression()
     test_spec_dropped_compacts_header()
@@ -207,4 +228,5 @@ if __name__ == "__main__":
     test_qty_price_supply_cells_populated()
     test_base_item_count_leaves_spacer_row_before_footer()
     test_many_items_inserts_rows_and_pushes_footer_block_down()
+    test_many_items_keeps_outer_frame_border_consistent()
     print("ALL PASSED")

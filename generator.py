@@ -136,8 +136,20 @@ def _add_item_row_merges(ws, row, layout):
             ws.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
 
 
+def _apply_outer_frame(ws, row):
+    """품목 표 영역을 감싸는 바깥 테두리(A열 왼쪽/AC열 오른쪽, medium)를 적용한다.
+
+    원본 템플릿은 11~27행에만 이 테두리가 미리 그려져 있어서, 품목이 많아 그
+    범위를 벗어난 새 행은 그냥 두면 테두리가 끊긴다. 그래서 품목 표와 관련된
+    모든 행(헤더/품목/이하여백/합계금액/여유행)에 매번 명시적으로 적용한다.
+    """
+    ws.cell(row=row, column=1).border = Border(left=Side(style="medium"))
+    ws.cell(row=row, column=FOOTER_BLOCK_MAX_COL).border = Border(right=Side(style="medium"))
+
+
 def _rebuild_header_row(ws, layout):
     ws.row_dimensions[ITEM_HEADER_ROW].height = ITEM_ROW_HEIGHT
+    _apply_outer_frame(ws, ITEM_HEADER_ROW)
     for start, end, label in layout.values():
         if end > start:
             ws.merge_cells(start_row=ITEM_HEADER_ROW, start_column=start,
@@ -148,6 +160,7 @@ def _rebuild_header_row(ws, layout):
 
 def _write_item_row(ws, row, layout, item, supply_letter):
     ws.row_dimensions[row].height = ITEM_ROW_HEIGHT
+    _apply_outer_frame(ws, row)
     ws[f"{_col_letter(layout, 'name')}{row}"] = item["name"]
     if "spec" in layout and item.get("spec"):
         ws[f"{_col_letter(layout, 'spec')}{row}"] = item["spec"]
@@ -259,6 +272,7 @@ def _rebuild_item_section(ws, items):
     blank_row = row
     table_end_letter = get_column_letter(TABLE_END_COL)
     ws.row_dimensions[blank_row].height = ITEM_ROW_HEIGHT
+    _apply_outer_frame(ws, blank_row)
     ws.merge_cells(f"{table_start_letter}{blank_row}:{table_end_letter}{blank_row}")
     ws[f"{table_start_letter}{blank_row}"] = "이하 여백"
     _style_span(ws, blank_row, TABLE_START_COL, TABLE_END_COL, FONT_REGULAR)
@@ -266,6 +280,7 @@ def _rebuild_item_section(ws, items):
 
     total_row = row
     ws.row_dimensions[total_row].height = ITEM_ROW_HEIGHT
+    _apply_outer_frame(ws, total_row)
     ws[f"{table_start_letter}{total_row}"] = "합계 금액"
     ws[f"{supply_letter}{total_row}"] = f"=SUM({supply_letter}{FIRST_ITEM_ROW}:{table_end_letter}{blank_row})"
     supply_start_col = layout["supply"][0]
@@ -281,8 +296,7 @@ def _rebuild_item_section(ws, items):
     # 감싸는 바깥 테두리(A/AC 열)는 끊기지 않도록 이어준다.
     spacer_row = total_row + 1
     ws.row_dimensions[spacer_row].height = ITEM_ROW_HEIGHT
-    ws.cell(row=spacer_row, column=1).border = Border(left=Side(style="medium"))
-    ws.cell(row=spacer_row, column=FOOTER_BLOCK_MAX_COL).border = Border(right=Side(style="medium"))
+    _apply_outer_frame(ws, spacer_row)
 
     footer_start_row = spacer_row + 1
     _restore_footer_block(ws, footer_block, footer_start_row)
