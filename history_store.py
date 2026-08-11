@@ -221,15 +221,18 @@ def record_generation(data):
     project_name = (data.get("project_name") or "").strip()
     if project_name:
         projects = load_projects()
+        existing = next((p for p in projects if p.get("project_name") == project_name), None)
         projects = [p for p in projects if p.get("project_name") != project_name]
-        projects.insert(
-            0,
-            {
-                "agency": (data.get("agency") or "").strip(),
-                "org": (data.get("org") or "").strip(),
-                "project_name": project_name,
-            },
-        )
+        entry = {
+            "agency": (data.get("agency") or "").strip(),
+            "org": (data.get("org") or "").strip(),
+            "project_name": project_name,
+        }
+        # 지출결의서 생성 폼에는 축약명 입력칸이 없어서, 이미 "+ 새 과제 추가"/"수정"으로
+        # 지정해 둔 축약명이 있으면 그대로 유지한다 (안 그러면 생성할 때마다 지워짐).
+        if existing and existing.get("label"):
+            entry["label"] = existing["label"]
+        projects.insert(0, entry)
         _save_json(PROJECTS_PATH, projects[:MAX_PROJECTS])
 
 
