@@ -158,6 +158,30 @@ def test_base_item_count_leaves_spacer_row_before_footer():
     print("OK: test_base_item_count_leaves_spacer_row_before_footer")
 
 
+def test_small_item_count_keeps_footer_at_original_template_position():
+    """품목이 적어서 원본 위치(FOOTER_BLOCK_START_ROW)에 이미 자연스러운 여백이
+    있으면, 결재란을 위로 끌어올리지 않고 원본 rev.2 양식과 동일한 자리에 둬야
+    한다. 예전 코드는 품목 수와 상관없이 항상 총 2행(여유행+결재란) 만큼
+    끌어올려서, 원본 캔버스의 뒷부분(예: 25~27행)이 잘려나간 채 방치되는
+    버그가 있었다 (시트 마지막 행이 print_area보다 더 길게 남음).
+    """
+    for n in (1, 2, BASE_ITEM_ROWS - 1):
+        data = dict(BASE_DATA)
+        data["items"] = [{"name": f"품목{i+1}", "unit": "EA", "qty": 1, "price": 100} for i in range(n)]
+        buf = build_expense_report(data)
+        wb = openpyxl.load_workbook(buf)
+        ws = wb.worksheets[0]
+
+        assert ws.cell(row=FOOTER_BLOCK_START_ROW, column=17).value == "재\n무\n부\n서", (
+            f"n={n}: 재무부서가 원본 위치({FOOTER_BLOCK_START_ROW}행)에 있지 않음"
+        )
+        footer_row = FOOTER_BLOCK_START_ROW + 3
+        assert ws.cell(row=footer_row, column=1).value == "[GP-A-001]"
+        assert ws.max_row == footer_row, f"n={n}: 결재란 뒤에 잘려나간 여분 행이 남아있음(max_row={ws.max_row})"
+        assert ws.print_area == f"'{ws.title}'!$A$1:$AC${footer_row}"
+    print("OK: test_small_item_count_keeps_footer_at_original_template_position")
+
+
 def test_many_items_inserts_rows_and_pushes_footer_block_down():
     extra = 6
     n = BASE_ITEM_ROWS + extra
@@ -252,6 +276,7 @@ if __name__ == "__main__":
     test_supply_direct_entry_when_price_off()
     test_qty_price_supply_cells_populated()
     test_base_item_count_leaves_spacer_row_before_footer()
+    test_small_item_count_keeps_footer_at_original_template_position()
     test_many_items_inserts_rows_and_pushes_footer_block_down()
     test_many_items_keeps_outer_frame_border_consistent()
     test_many_items_keeps_accounting_number_format_for_overflow_rows()

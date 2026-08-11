@@ -308,12 +308,16 @@ def _rebuild_item_section(ws, items):
     ws["S5"] = f"={supply_letter}{total_row}"
 
     # 합계 금액 행과 결재란 사이에 여유 있게 빈 행을 하나 두되, 문서 전체를
-    # 감싸는 바깥 테두리(A/AC 열)는 끊기지 않도록 이어준다.
+    # 감싸는 바깥 테두리(A/AC 열)는 끊기지 않도록 이어준다. 품목이 적어서 원본
+    # 위치(FOOTER_BLOCK_START_ROW)에 이미 자연스러운 여백이 있으면 결재란을
+    # 위로 끌어올리지 않고 원본 그대로의 자리에 둔다 - 그래야 원본 rev.2
+    # 양식과 동일한 위치가 유지된다. 품목이 많아서 그 자리를 침범할 때만
+    # 필요한 만큼 아래로 밀어낸다.
     spacer_row = total_row + 1
     ws.row_dimensions[spacer_row].height = ITEM_ROW_HEIGHT
     _apply_outer_frame(ws, spacer_row)
 
-    footer_start_row = spacer_row + 1
+    footer_start_row = max(FOOTER_BLOCK_START_ROW, spacer_row + 1)
     _restore_footer_block(ws, footer_block, footer_start_row)
 
     last_row = footer_start_row + FOOTER_BLOCK_ROW_COUNT - 1
