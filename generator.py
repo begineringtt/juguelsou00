@@ -34,6 +34,11 @@ FONT_BOLD = Font(name=FONT_NAME, size=10, bold=True)
 ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 ALIGN_LEFT = Alignment(horizontal="left", vertical="center")
 
+# 원본 템플릿이 수량/단가/공급가/부가세 칸(11~27행 O~AA열)에 미리 적용해 둔 회계
+# 표시 형식. 그 범위 밖(품목이 많아 새로 생긴 행)의 숫자 칸에도 명시적으로
+# 적용해야 "일반" 형식으로 보이지 않는다.
+ACCOUNTING_NUMBER_FORMAT = '_-* #,##0_-;\\-* #,##0_-;_-* "-"_-;_-@_-'
+
 _THIN_SIDE = Side(style="thin")
 _NO_SIDE = Side(style=None)
 
@@ -170,10 +175,14 @@ def _write_item_row(ws, row, layout, item, supply_letter):
     use_qty = "qty" in layout and item.get("qty") is not None
     use_price = "price" in layout and item.get("price") is not None
     if use_qty:
-        ws[f"{_col_letter(layout, 'qty')}{row}"] = item["qty"]
+        qty_cell = ws[f"{_col_letter(layout, 'qty')}{row}"]
+        qty_cell.value = item["qty"]
+        qty_cell.number_format = ACCOUNTING_NUMBER_FORMAT
     if use_price:
         price_letter = _col_letter(layout, "price")
-        ws[f"{price_letter}{row}"] = item["price"]
+        price_cell = ws[f"{price_letter}{row}"]
+        price_cell.value = item["price"]
+        price_cell.number_format = ACCOUNTING_NUMBER_FORMAT
         if use_qty:
             qty_letter = _col_letter(layout, "qty")
             ws[f"{supply_letter}{row}"] = f"={qty_letter}{row}*{price_letter}{row}"
@@ -181,7 +190,11 @@ def _write_item_row(ws, row, layout, item, supply_letter):
             ws[f"{supply_letter}{row}"] = f"={price_letter}{row}"
     else:
         ws[f"{supply_letter}{row}"] = item.get("supply", 0)
-    ws[f"{_col_letter(layout, 'vat')}{row}"] = f"={supply_letter}{row}/10"
+    supply_cell = ws[f"{supply_letter}{row}"]
+    supply_cell.number_format = ACCOUNTING_NUMBER_FORMAT
+    vat_cell = ws[f"{_col_letter(layout, 'vat')}{row}"]
+    vat_cell.value = f"={supply_letter}{row}/10"
+    vat_cell.number_format = ACCOUNTING_NUMBER_FORMAT
 
     _add_item_row_merges(ws, row, layout)
     for start, end, _label in layout.values():
@@ -282,7 +295,9 @@ def _rebuild_item_section(ws, items):
     ws.row_dimensions[total_row].height = ITEM_ROW_HEIGHT
     _apply_outer_frame(ws, total_row)
     ws[f"{table_start_letter}{total_row}"] = "합계 금액"
-    ws[f"{supply_letter}{total_row}"] = f"=SUM({supply_letter}{FIRST_ITEM_ROW}:{table_end_letter}{blank_row})"
+    total_amount_cell = ws[f"{supply_letter}{total_row}"]
+    total_amount_cell.value = f"=SUM({supply_letter}{FIRST_ITEM_ROW}:{table_end_letter}{blank_row})"
+    total_amount_cell.number_format = ACCOUNTING_NUMBER_FORMAT
     supply_start_col = layout["supply"][0]
     label_end_letter = get_column_letter(supply_start_col - 1)
     ws.merge_cells(f"{table_start_letter}{total_row}:{label_end_letter}{total_row}")

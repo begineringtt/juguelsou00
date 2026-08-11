@@ -220,6 +220,31 @@ def test_many_items_keeps_outer_frame_border_consistent():
     print("OK: test_many_items_keeps_outer_frame_border_consistent")
 
 
+def test_many_items_keeps_accounting_number_format_for_overflow_rows():
+    """27행을 넘어간 품목의 수량/단가/공급가/부가세도 원본 캔버스 안 품목과 같은
+    회계 표시 형식(#,##0)을 쓰는지 확인한다 (안 그러면 '일반' 형식으로 보임).
+    """
+    n = BASE_ITEM_ROWS + 6
+    data = dict(BASE_DATA)
+    data["items"] = [{"name": f"품목{i+1}", "unit": "EA", "qty": 1, "price": 100} for i in range(n)]
+    buf = build_expense_report(data)
+    wb = openpyxl.load_workbook(buf)
+    ws = wb.worksheets[0]
+
+    layout = _compute_column_layout({"use_spec": False, "use_unit": True, "use_qty": True, "use_price": True})
+    qty_col, price_col, supply_col, vat_col = (
+        layout["qty"][0], layout["price"][0], layout["supply"][0], layout["vat"][0]
+    )
+
+    inside_canvas_row = FIRST_ITEM_ROW + 1
+    overflow_row = FIRST_ITEM_ROW + BASE_ITEM_ROWS + 2
+    for row in (inside_canvas_row, overflow_row):
+        for col in (qty_col, price_col, supply_col, vat_col):
+            fmt = ws.cell(row=row, column=col).number_format
+            assert fmt != "General", f"row {row} col {col} still shows General format"
+    print("OK: test_many_items_keeps_accounting_number_format_for_overflow_rows")
+
+
 if __name__ == "__main__":
     test_all_columns_regression()
     test_spec_dropped_compacts_header()
@@ -229,4 +254,5 @@ if __name__ == "__main__":
     test_base_item_count_leaves_spacer_row_before_footer()
     test_many_items_inserts_rows_and_pushes_footer_block_down()
     test_many_items_keeps_outer_frame_border_consistent()
+    test_many_items_keeps_accounting_number_format_for_overflow_rows()
     print("ALL PASSED")
