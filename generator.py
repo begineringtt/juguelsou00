@@ -49,7 +49,7 @@ PROJECT_INFO_END_COL = 29   # AC
 
 ITEM_HEADER_ROW = 16
 FIRST_ITEM_ROW = 17
-LAST_USABLE_ROW = 27  # 품목이 이 안에 다 들어가면 결재란/각주를 원래 자리에 그대로 둔다
+LAST_USABLE_ROW = 27  # 원본 템플릿에서 결재란 앞까지 비어 있는 마지막 행
 
 TABLE_START_COL = 2   # B
 TABLE_END_COL = 28    # AB
@@ -63,6 +63,10 @@ BASE_ITEM_ROWS = LAST_USABLE_ROW - FIRST_ITEM_ROW - 1  # 9
 FOOTER_BLOCK_START_ROW = LAST_USABLE_ROW + 1  # 28
 FOOTER_BLOCK_ROW_COUNT = 4
 FOOTER_BLOCK_MAX_COL = PROJECT_INFO_END_COL   # AC, 블록이 쓰는 가장 오른쪽 열
+
+# 11~27행(빈 캔버스) 원본 행 높이. 이 범위를 벗어나는 새 행(품목이 많아서 늘어난
+# 행, 합계 금액 아래 여백 행)에도 그대로 적용해서 서식이 어긋나지 않게 한다.
+ITEM_ROW_HEIGHT = 21.75
 
 ITEM_FIELDS = [
     ("name", "품목", 4, None),
@@ -133,6 +137,7 @@ def _add_item_row_merges(ws, row, layout):
 
 
 def _rebuild_header_row(ws, layout):
+    ws.row_dimensions[ITEM_HEADER_ROW].height = ITEM_ROW_HEIGHT
     for start, end, label in layout.values():
         if end > start:
             ws.merge_cells(start_row=ITEM_HEADER_ROW, start_column=start,
@@ -142,6 +147,7 @@ def _rebuild_header_row(ws, layout):
 
 
 def _write_item_row(ws, row, layout, item, supply_letter):
+    ws.row_dimensions[row].height = ITEM_ROW_HEIGHT
     ws[f"{_col_letter(layout, 'name')}{row}"] = item["name"]
     if "spec" in layout and item.get("spec"):
         ws[f"{_col_letter(layout, 'spec')}{row}"] = item["spec"]
@@ -252,12 +258,14 @@ def _rebuild_item_section(ws, items):
 
     blank_row = row
     table_end_letter = get_column_letter(TABLE_END_COL)
+    ws.row_dimensions[blank_row].height = ITEM_ROW_HEIGHT
     ws.merge_cells(f"{table_start_letter}{blank_row}:{table_end_letter}{blank_row}")
     ws[f"{table_start_letter}{blank_row}"] = "이하 여백"
     _style_span(ws, blank_row, TABLE_START_COL, TABLE_END_COL, FONT_REGULAR)
     row += 1
 
     total_row = row
+    ws.row_dimensions[total_row].height = ITEM_ROW_HEIGHT
     ws[f"{table_start_letter}{total_row}"] = "합계 금액"
     ws[f"{supply_letter}{total_row}"] = f"=SUM({supply_letter}{FIRST_ITEM_ROW}:{table_end_letter}{blank_row})"
     supply_start_col = layout["supply"][0]
@@ -269,7 +277,18 @@ def _rebuild_item_section(ws, items):
 
     ws["S5"] = f"={supply_letter}{total_row}"
 
-    _restore_footer_block(ws, footer_block, total_row + 1)
+    # 합계 금액 행과 결재란 사이에 여유 있게 빈 행을 하나 두되, 문서 전체를
+    # 감싸는 바깥 테두리(A/AC 열)는 끊기지 않도록 이어준다.
+    spacer_row = total_row + 1
+    ws.row_dimensions[spacer_row].height = ITEM_ROW_HEIGHT
+    ws.cell(row=spacer_row, column=1).border = Border(left=Side(style="medium"))
+    ws.cell(row=spacer_row, column=FOOTER_BLOCK_MAX_COL).border = Border(right=Side(style="medium"))
+
+    footer_start_row = spacer_row + 1
+    _restore_footer_block(ws, footer_block, footer_start_row)
+
+    last_row = footer_start_row + FOOTER_BLOCK_ROW_COUNT - 1
+    ws.print_area = f"A1:{get_column_letter(FOOTER_BLOCK_MAX_COL)}{last_row}"
 
     return total_row
 

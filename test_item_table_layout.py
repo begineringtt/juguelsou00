@@ -135,18 +135,27 @@ def test_qty_price_supply_cells_populated():
     print("OK: test_qty_price_supply_cells_populated")
 
 
-def test_base_item_count_keeps_footer_at_original_position():
+def test_base_item_count_leaves_spacer_row_before_footer():
     data = dict(BASE_DATA)
     data["items"] = [{"name": f"품목{i+1}", "unit": "EA", "qty": 1, "price": 100} for i in range(BASE_ITEM_ROWS)]
     buf = build_expense_report(data)
     wb = openpyxl.load_workbook(buf)
     ws = wb.worksheets[0]
 
-    assert ws.cell(row=FOOTER_BLOCK_START_ROW, column=17).value == "재\n무\n부\n서"
-    footer_row = FOOTER_BLOCK_START_ROW + 3
+    total_row = FIRST_ITEM_ROW + BASE_ITEM_ROWS + 1  # +1 for 이하 여백
+    assert ws.cell(row=total_row, column=2).value == "합계 금액"
+
+    spacer_row = total_row + 1
+    assert ws.cell(row=spacer_row, column=2).value is None
+    assert ws.cell(row=spacer_row, column=1).border.left.style == "medium"
+
+    footer_start = spacer_row + 1
+    assert footer_start == FOOTER_BLOCK_START_ROW + 1
+    assert ws.cell(row=footer_start, column=17).value == "재\n무\n부\n서"
+    footer_row = footer_start + 3
     assert ws.cell(row=footer_row, column=1).value == "[GP-A-001]"
     assert ws.cell(row=footer_row, column=13).value == "주식회사 그린플러스"
-    print("OK: test_base_item_count_keeps_footer_at_original_position")
+    print("OK: test_base_item_count_leaves_spacer_row_before_footer")
 
 
 def test_many_items_inserts_rows_and_pushes_footer_block_down():
@@ -160,14 +169,18 @@ def test_many_items_inserts_rows_and_pushes_footer_block_down():
 
     last_item_row = FIRST_ITEM_ROW + n - 1
     assert ws.cell(row=last_item_row, column=2).value == f"품목{n}"
+    assert ws.row_dimensions[last_item_row].height == 21.75
 
     blank_row = last_item_row + 1
     total_row = blank_row + 1
     assert ws.cell(row=blank_row, column=2).value == "이하 여백"
     assert ws.cell(row=total_row, column=2).value == "합계 금액"
 
-    new_footer_start = total_row + 1
-    assert new_footer_start == FOOTER_BLOCK_START_ROW + extra
+    spacer_row = total_row + 1
+    assert ws.cell(row=spacer_row, column=2).value is None
+
+    new_footer_start = spacer_row + 1
+    assert new_footer_start == FOOTER_BLOCK_START_ROW + extra + 1
     assert ws.cell(row=new_footer_start, column=17).value == "재\n무\n부\n서"
     assert ws.cell(row=new_footer_start, column=18).value == "담당"
 
@@ -180,6 +193,9 @@ def test_many_items_inserts_rows_and_pushes_footer_block_down():
     assert (new_footer_start, new_footer_start + 2, 17, 17) in merges  # Q열 세로 병합 (재무부서)
     assert (footer_row, footer_row, 1, 12) in merges  # [GP-A-001]
     assert (footer_row, footer_row, 13, 29) in merges  # 주식회사 그린플러스
+
+    # 페이지 나누기 미리보기(인쇄 영역)도 새 마지막 행까지 늘어났는지 확인
+    assert ws.print_area == f"'{ws.title}'!$A$1:$AC${footer_row}"
     print("OK: test_many_items_inserts_rows_and_pushes_footer_block_down")
 
 
@@ -189,6 +205,6 @@ if __name__ == "__main__":
     test_total_row_boundary_matches_supply_start()
     test_supply_direct_entry_when_price_off()
     test_qty_price_supply_cells_populated()
-    test_base_item_count_keeps_footer_at_original_position()
+    test_base_item_count_leaves_spacer_row_before_footer()
     test_many_items_inserts_rows_and_pushes_footer_block_down()
     print("ALL PASSED")
