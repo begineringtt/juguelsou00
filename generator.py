@@ -1,15 +1,18 @@
 """지출결의서(支出決議書) 엑셀 파일 자동 생성 로직.
 
 template_files/base_template.xlsx 를 원본으로 하여, 사용자가 입력한 값으로
-채운 새 엑셀 파일을 만들어 낸다. 품목 개수는 1개 이상 자유롭게 늘어날 수 있다
-(단, 새 양식(rev.2)은 결재란/회사명 각주가 고정 위치라 품목 칸 수에 상한이 있다.
-MAX_ITEM_ROWS 참고).
+채운 새 엑셀 파일을 만들어 낸다. 품목 개수는 1개 이상 자유롭게 늘어날 수 있고,
+기본 칸 수(9개, LAST_USABLE_ROW 기준)를 넘으면 그만큼 행을 더 만들어서
+재무부서 결재란/회사명 각주(고정 블록)를 그 아래로 밀어낸다.
 
 rev.2 양식은 품목 표/과제 정보 영역(11~27행)이 완전히 빈 캔버스로 제공되어
 서식을 캡처할 참조 행이 없다. 그래서 폰트/테두리를 코드에서 직접 구성해서
-매번 새로 그리는 방식으로 구현한다.
+매번 새로 그리는 방식으로 구현한다. 결재란/각주 블록(28~31행)은 반대로 이미
+서식이 잡혀 있으므로, 매번 그 서식을 통째로 캡처해뒀다가 품목 수에 맞는
+위치에 다시 그려 넣는다.
 """
 
+import copy
 import datetime
 import io
 import os
@@ -46,14 +49,20 @@ PROJECT_INFO_END_COL = 29   # AC
 
 ITEM_HEADER_ROW = 16
 FIRST_ITEM_ROW = 17
-LAST_USABLE_ROW = 27  # 이 아래(28행)부터는 재무부서 결재란이 고정되어 있어 침범 불가
+LAST_USABLE_ROW = 27  # 품목이 이 안에 다 들어가면 결재란/각주를 원래 자리에 그대로 둔다
 
 TABLE_START_COL = 2   # B
 TABLE_END_COL = 28    # AB
 TABLE_WIDTH = TABLE_END_COL - TABLE_START_COL + 1  # 27
 
-# 품목 헤더(1) + 이하 여백(1) + 합계 금액(1) 을 제외한 나머지가 품목 최대 개수
-MAX_ITEM_ROWS = LAST_USABLE_ROW - FIRST_ITEM_ROW - 1  # 9
+# 품목 헤더(1) + 이하 여백(1) + 합계 금액(1) 을 제외한 나머지가 기본 품목 칸 수.
+# 이보다 품목이 많으면 그만큼 행을 더 만들고 아래 결재란/각주 블록을 밀어낸다.
+BASE_ITEM_ROWS = LAST_USABLE_ROW - FIRST_ITEM_ROW - 1  # 9
+
+# 재무부서 결재란 + 회사명 각주(고정 서식 블록). 원본 템플릿 기준 28~31행.
+FOOTER_BLOCK_START_ROW = LAST_USABLE_ROW + 1  # 28
+FOOTER_BLOCK_ROW_COUNT = 4
+FOOTER_BLOCK_MAX_COL = PROJECT_INFO_END_COL   # AC, 블록이 쓰는 가장 오른쪽 열
 
 ITEM_FIELDS = [
     ("name", "품목", 4, None),
@@ -160,16 +169,73 @@ def _write_item_row(ws, row, layout, item, supply_letter):
         _style_span(ws, row, start, end, FONT_REGULAR)
 
 
+def _capture_footer_block(ws):
+    """재무부서 결재란 + 회사명 각주 블록(FOOTER_BLOCK_START_ROW 기준 4행)의
+    값/서식/병합 정보를 통째로 캡처한다. 품목이 기본 칸 수를 넘어가면 이 블록을
+    지웠다가 더 아래 위치에 다시 그려 넣기 위함이다.
+    """
+    rows = []
+    for offset in range(FOOTER_BLOCK_ROW_COUNT):
+        row = FOOTER_BLOCK_START_ROW + offset
+        cells = []
+        for col in range(1, FOOTER_BLOCK_MAX_COL + 1):
+            c = ws.cell(row=row, column=col)
+            cells.append({
+                "value": c.value,
+                "font": copy.copy(c.font),
+                "border": copy.copy(c.border),
+                "fill": copy.copy(c.fill),
+                "alignment": copy.copy(c.alignment),
+                "number_format": c.number_format,
+            })
+        rows.append({"height": ws.row_dimensions[row].height, "cells": cells})
+
+    merges = [
+        (m.min_row - FOOTER_BLOCK_START_ROW, m.max_row - FOOTER_BLOCK_START_ROW, m.min_col, m.max_col)
+        for m in ws.merged_cells.ranges
+        if m.min_row >= FOOTER_BLOCK_START_ROW
+    ]
+    return {"rows": rows, "merges": merges}
+
+
+def _clear_footer_block(ws):
+    for m in [m for m in ws.merged_cells.ranges if m.min_row >= FOOTER_BLOCK_START_ROW]:
+        ws.unmerge_cells(str(m))
+    ws.delete_rows(FOOTER_BLOCK_START_ROW, FOOTER_BLOCK_ROW_COUNT)
+
+
+def _restore_footer_block(ws, block, new_start_row):
+    for offset, row_data in enumerate(block["rows"]):
+        row = new_start_row + offset
+        ws.row_dimensions[row].height = row_data["height"]
+        for col_idx, style in enumerate(row_data["cells"], start=1):
+            c = ws.cell(row=row, column=col_idx)
+            c.value = style["value"]
+            c.font = style["font"]
+            c.border = style["border"]
+            c.fill = style["fill"]
+            c.alignment = style["alignment"]
+            c.number_format = style["number_format"]
+
+    for row_off_start, row_off_end, min_col, max_col in block["merges"]:
+        ws.merge_cells(
+            start_row=new_start_row + row_off_start,
+            end_row=new_start_row + row_off_end,
+            start_column=min_col,
+            end_column=max_col,
+        )
+
+
 def _rebuild_item_section(ws, items):
-    """품목 표(헤더~합계 금액)를 11~27행 사이의 빈 캔버스에 새로 그린다.
+    """품목 표(헤더~합계 금액)를 11행 이후 빈 캔버스에 새로 그린다.
+
+    품목이 BASE_ITEM_ROWS(기본 9개)를 넘어가면 그만큼 행을 더 만들고, 아래에
+    고정되어 있던 재무부서 결재란/각주 블록을 그 뒤로 밀어서 다시 그린다.
 
     반환값: total_row (합계 금액 행 번호)
     """
-    if len(items) > MAX_ITEM_ROWS:
-        raise ValueError(
-            f"품목이 너무 많습니다 (최대 {MAX_ITEM_ROWS}개, 입력 {len(items)}개). "
-            "새 지출결의서 양식은 품목 칸이 고정되어 있어 여러 건으로 나눠서 작성해주세요."
-        )
+    footer_block = _capture_footer_block(ws)
+    _clear_footer_block(ws)
 
     flags = _infer_flags(items)
     layout = _compute_column_layout(flags)
@@ -202,6 +268,8 @@ def _rebuild_item_section(ws, items):
     _style_span(ws, total_row, supply_start_col, TABLE_END_COL, FONT_BOLD)
 
     ws["S5"] = f"={supply_letter}{total_row}"
+
+    _restore_footer_block(ws, footer_block, total_row + 1)
 
     return total_row
 
