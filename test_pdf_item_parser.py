@@ -59,6 +59,34 @@ def test_match_field_fuzzy_matches_substring_with_bullet_prefix():
     print("OK: test_match_field_fuzzy_matches_substring_with_bullet_prefix")
 
 
+def test_match_field_exact_recognizes_quantity_synonym():
+    assert match_field("Quantity") == "qty"
+    print("OK: test_match_field_exact_recognizes_quantity_synonym")
+
+
+def test_find_header_row_uses_fuzzy_fallback_for_unmatched_exact_labels():
+    # "Price(￦/M2)"는 "UNIT PRICE"/"단가"와 정확히 일치하지 않지만 "PRICE"를
+    # 부분 문자열로 포함하므로 fuzzy fallback으로 매칭돼야 한다.
+    table = [
+        ["Description", "Quantity", "Unit", "Price(￦/M2)"],
+        ["ETFE film", "2.0", "days", "6,119,375"],
+    ]
+    idx, score = find_header_row(table)
+    assert idx == 0
+    assert score == 4
+    print("OK: test_find_header_row_uses_fuzzy_fallback_for_unmatched_exact_labels")
+
+
+def test_map_table_columns_maps_quantity_and_bracketed_price_headers():
+    table = [
+        ["Description", "Quantity", "Unit", "Price(￦/M2)"],
+        ["ETFE film", "2.0", "days", "6,119,375"],
+    ]
+    result = map_table_columns(table)
+    assert result["columns"] == {"name": [0], "qty": [1], "unit": [2], "price": [3]}
+    print("OK: test_map_table_columns_maps_quantity_and_bracketed_price_headers")
+
+
 def _words(*text_left_pairs):
     return [{"text": text, "left": left} for text, left in text_left_pairs]
 
@@ -566,6 +594,9 @@ if __name__ == "__main__":
     test_match_field_exact_single_line()
     test_match_field_multiline_header_checks_each_line()
     test_match_field_fuzzy_matches_substring_with_bullet_prefix()
+    test_match_field_exact_recognizes_quantity_synonym()
+    test_find_header_row_uses_fuzzy_fallback_for_unmatched_exact_labels()
+    test_map_table_columns_maps_quantity_and_bracketed_price_headers()
     test_match_field_recognizes_description_as_name()
     test_match_row_labels_merges_split_syllables()
     test_match_row_labels_skips_noise_tokens_between_syllables()

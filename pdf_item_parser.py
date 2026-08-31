@@ -36,8 +36,8 @@ HEADER_SYNONYMS = {
     "name": ["품명", "품 명", "공사명/품명", "물품명", "ITEM", "DESCRIPTION"],
     "spec": ["규격", "규 격", "SIZE", "형식", "규격/색상", "사양"],
     "unit": ["단위", "단 위", "UNIT"],
-    "qty": ["수량", "수 량", "Q'TY", "QTY"],
-    "price": ["단가", "단 가", "UNIT PRICE"],
+    "qty": ["수량", "수 량", "Q'TY", "QTY", "QUANTITY"],
+    "price": ["단가", "단 가", "UNIT PRICE", "PRICE"],
 }
 
 _NUMBER_RE = re.compile(r"[0-9][0-9,.\s]*[0-9]|[0-9]")
@@ -253,7 +253,7 @@ def find_header_row(table, max_scan=None):
     best_idx, best_score = None, 0
     rows = table[:max_scan] if max_scan is not None else table
     for idx, row in enumerate(rows):
-        score = sum(1 for cell in row if match_field(cell))
+        score = sum(1 for cell in row if match_field(cell) or match_field_fuzzy(cell))
         if score > best_score:
             best_idx, best_score = idx, score
     return best_idx, best_score
@@ -274,7 +274,7 @@ def map_table_columns(table):
         return None
     columns = {}
     for idx, cell in enumerate(table[header_idx]):
-        field = match_field(cell)
+        field = match_field(cell) or match_field_fuzzy(cell)
         if field:
             columns.setdefault(field, []).append(idx)
     if "name" not in columns or ("qty" not in columns and "price" not in columns):
