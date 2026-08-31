@@ -2,7 +2,9 @@ import base64
 import os
 
 import fitz
+import pytesseract
 
+import pdf_item_parser
 from pdf_item_parser import (
     normalize_header, match_field, match_field_fuzzy, parse_number,
     find_header_row, score_table, map_table_columns, extract_items_from_table,
@@ -55,6 +57,45 @@ def test_match_field_fuzzy_matches_substring_with_bullet_prefix():
     assert match_field_fuzzy("ㅇ. 공 급 가 액") is None
     assert match_field_fuzzy("ㅇ. 부 가 세") is None
     print("OK: test_match_field_fuzzy_matches_substring_with_bullet_prefix")
+
+
+def _words(*text_left_pairs):
+    return [{"text": text, "left": left} for text, left in text_left_pairs]
+
+
+def test_match_row_labels_merges_split_syllables():
+    # Tesseract가 "품명"을 음절 단위로 쪼개 "품", "명" 두 단어로 인식하는 경우가
+    # 흔한데, 단어 하나만 보면 2글자 라벨을 절대 못 찾는다.
+    fields = pdf_item_parser._match_row_labels(_words(("품", 0), ("명", 40)))
+    assert fields == {"name": [0]}
+    print("OK: test_match_row_labels_merges_split_syllables")
+
+
+def test_match_row_labels_skips_noise_tokens_between_syllables():
+    # 표 테두리 등이 "_"/"|" 같은 잡음 단어로 잡혀 음절 사이에 끼어드는 경우.
+    fields = pdf_item_parser._match_row_labels(_words(("품", 0), ("_", 30), ("명", 60)))
+    assert fields == {"name": [0]}
+    print("OK: test_match_row_labels_skips_noise_tokens_between_syllables")
+
+
+def test_match_row_labels_unrelated_seed_does_not_swallow_next_label():
+    # "No"(행 번호)가 이어붙이기 시작점이 되어 뒤따르는 "품"+"명"까지 삼켜서
+    # "No품명"을 "품명"의 부분 문자열로 오인식하면 안 된다 - 앵커 위치가
+    # "No"(0)가 아니라 "품"(50)이어야 한다.
+    fields = pdf_item_parser._match_row_labels(_words(("No", 0), ("품", 50), ("명", 90)))
+    assert fields == {"name": [50]}
+    print("OK: test_match_row_labels_unrelated_seed_does_not_swallow_next_label")
+
+
+def test_match_row_labels_does_not_cross_into_next_label():
+    # "명"(품명의 뒷글자)에서 시작해 다음 라벨 "규"+"격"까지 이어붙이면
+    # "명규격"이 "규격"을 부분 문자열로 포함해버려 spec이 중복/오탐된다 -
+    # 접두사 일치만 허용해서 이걸 막아야 한다.
+    fields = pdf_item_parser._match_row_labels(
+        _words(("품", 0), ("명", 40), ("규", 90), ("격", 130))
+    )
+    assert fields == {"name": [0], "spec": [90]}
+    print("OK: test_match_row_labels_does_not_cross_into_next_label")
 
 
 def test_parse_number_handles_currency_and_stray_spaces():
@@ -400,6 +441,56 @@ def test_parse_pdf_items_no_table_fallback_case():
     print("OK: test_parse_pdf_items_no_table_fallback_case")
 
 
+def test_parse_pdf_items_scanned_pdf_uses_ocr_for_company():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_scanned_pdf_uses_ocr_for_company (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_알루스퀘어.pdf"))
+    assert result["company"] == "알루스퀘어"
+    assert any("OCR" in w for w in result["warnings"])
+    assert len(result["page_images"]) == 1
+    print("OK: test_parse_pdf_items_scanned_pdf_uses_ocr_for_company")
+
+
+def test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec():
+    # 이 PDF는 전체 페이지를 저해상도 배경(JPEG)으로 깔고 실제 글자는 고해상도
+    # 1비트 스캔 이미지를 별도로 얹은 팩스 스캔본이라, 페이지 전체를 한 번에
+    # 렌더링해서 OCR하면(zoom을 얼마나 올리든) 표 헤더/품목 글자가 뭉개져
+    # 품명/규격을 전혀 인식하지 못했다(items == []였음). 임베드된 원본 이미지를
+    # 리샘플링 없이 그대로 OCR하고, 음절 단위로 쪼개진 헤더 라벨("품","명")도
+    # 이어붙여 인식하도록 고친 뒤에는 품명/규격이 채워져야 한다.
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_알루스퀘어.pdf"))
+    items = result["items"]
+    assert len(items) == 2
+    for item in items:
+        assert "AL" in item["name"]
+        assert item["spec"].strip()
+    print("OK: test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec")
+
+
+def test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract (no sample dir)")
+        return
+    original_cmd = pytesseract.pytesseract.tesseract_cmd
+    original_configured = pdf_item_parser._tesseract_configured
+    pytesseract.pytesseract.tesseract_cmd = "definitely_missing_tesseract_binary.exe"
+    pdf_item_parser._tesseract_configured = True
+    try:
+        result = parse_pdf_items(_load_sample("견적서_알루스퀘어.pdf"))
+        assert result["items"] == []
+        assert result["company"] is None
+        assert result["title"] is None
+        assert any("찾을 수 없" in w for w in result["warnings"])
+    finally:
+        pytesseract.pytesseract.tesseract_cmd = original_cmd
+        pdf_item_parser._tesseract_configured = original_configured
+    print("OK: test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract")
+
+
 def test_extract_company_name_various_samples():
     if not os.path.isdir(SAMPLE_DIR):
         print("SKIP: test_extract_company_name_various_samples (no sample dir)")
@@ -476,6 +567,10 @@ if __name__ == "__main__":
     test_match_field_multiline_header_checks_each_line()
     test_match_field_fuzzy_matches_substring_with_bullet_prefix()
     test_match_field_recognizes_description_as_name()
+    test_match_row_labels_merges_split_syllables()
+    test_match_row_labels_skips_noise_tokens_between_syllables()
+    test_match_row_labels_unrelated_seed_does_not_swallow_next_label()
+    test_match_row_labels_does_not_cross_into_next_label()
     test_parse_number_handles_currency_and_stray_spaces()
     test_find_header_row_at_index_zero()
     test_find_header_row_scans_past_summary_row()
@@ -506,6 +601,9 @@ if __name__ == "__main__":
     test_parse_pdf_items_hierarchical_case()
     test_parse_pdf_items_duplicate_header_case()
     test_parse_pdf_items_no_table_fallback_case()
+    test_parse_pdf_items_scanned_pdf_uses_ocr_for_company()
+    test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec()
+    test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract()
     test_extract_company_name_various_samples()
     test_extract_company_name_excludes_our_own_company()
     test_extract_title_various_samples()

@@ -38,6 +38,10 @@ python app.py
 2. "과제 정보"에서 기존 과제를 선택하거나 새 과제를 직접 추가/수정할 수 있습니다.
 3. 품목을 직접 입력하거나, 견적서 PDF를 업로드/드래그하면 품목·업체명·내용(제목)이
    자동으로 인식되어 채워집니다 (인식 결과는 적용 전에 화면에서 확인/수정 가능합니다).
+   텍스트 레이어가 없는 스캔/팩스 PDF는 내장된 OCR(Tesseract, 한국어+영어)로
+   자동 인식을 시도합니다 - 화질이 나쁜 팩스는 표 인식률이 떨어질 수 있으니
+   인식 결과를 미리보기 이미지와 꼭 대조해주세요. OCR 엔진은 `tesseract_bin/`에
+   함께 들어있어 별도 설치가 필요 없습니다.
 4. "엑셀 파일 생성" 버튼을 누르면 완성된 `.xlsx` 파일이 다운로드됩니다.
 
 한 번 입력한 값(업체명/과제/문구 등)은 `data/` 폴더에 로컬로 저장되어 다음 실행 때
@@ -73,7 +77,8 @@ pyinstaller 지출결의서생성기.spec
 app.py              Flask 라우트
 generator.py         엑셀 생성 로직 (template_files/base_template.xlsx 채우기)
 history_store.py     입력 이력/과제 프리셋 로컬 저장(JSON)
-pdf_item_parser.py    견적서 PDF에서 품목/업체명/내용(제목) 인식
+pdf_item_parser.py    견적서 PDF에서 품목/업체명/내용(제목) 인식 (스캔 PDF는 OCR로 대체)
 templates/index.html  웹 UI
 template_files/       회사 지출결의서 원본 엑셀 양식
+tesseract_bin/         스캔 PDF OCR용 Tesseract 실행 파일 + 한국어/영어 언어팩(번들)
 ```
