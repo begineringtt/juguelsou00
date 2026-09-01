@@ -1,9 +1,10 @@
 import openpyxl
 from openpyxl.utils import get_column_letter
 
+import column_settings
 from generator import (
     ITEM_HEADER_ROW, TABLE_START_COL, TABLE_END_COL, FIRST_ITEM_ROW, BASE_ITEM_ROWS,
-    FOOTER_BLOCK_START_ROW, FOOTER_BLOCK_MAX_COL, _compute_column_layout,
+    FOOTER_BLOCK_START_ROW, FOOTER_BLOCK_MAX_COL, _compute_column_layout, _infer_active_keys,
 )
 from generator import build_expense_report
 
@@ -48,9 +49,9 @@ def test_all_columns_regression():
     ws = wb.worksheets[0]
 
     assert _header_labels(ws) == {
-        "B": "품목", "G": "규격", "K": "단위", "N": "수량", "Q": "단가", "U": "공급가", "Y": "부가세",
+        "B": "품목", "I": "규격", "O": "단위", "P": "수량", "Q": "단가", "U": "공급가", "Y": "부가세",
     }
-    assert _header_merges(ws) == sorted([(2, 6), (7, 10), (11, 13), (14, 16), (17, 20), (21, 24), (25, 28)])
+    assert _header_merges(ws) == sorted([(2, 8), (9, 14), (17, 20), (21, 24), (25, 28)])
     print("OK: test_all_columns_regression")
 
 
@@ -65,19 +66,26 @@ def test_spec_dropped_compacts_header():
     assert "규격" not in labels.values()
     assert set(labels.values()) == {"품목", "단위", "수량", "단가", "공급가", "부가세"}
 
+    # Verify columns span from B to AB (2 to 28) with no gaps
+    # Collect all columns that are covered by merges or have headers
+    covered_cols = set()
     merges = _header_merges(ws)
-    assert merges[0][0] == 2
-    assert merges[-1][1] == 28
-    total_span = sum(end - start + 1 for start, end in merges)
-    assert total_span == 27
+    for start, end in merges:
+        covered_cols.update(range(start, end + 1))
+    for col in range(TABLE_START_COL, TABLE_END_COL + 1):
+        if ws.cell(row=ITEM_HEADER_ROW, column=col).value:
+            covered_cols.add(col)
+
+    assert covered_cols == set(range(2, 29))
     print("OK: test_spec_dropped_compacts_header")
 
 
 def test_total_row_boundary_matches_supply_start():
     data = dict(BASE_DATA)
     data["items"] = [{"name": "품목1", "unit": "EA", "qty": 2, "price": 1000}]
-    flags = {"use_spec": False, "use_unit": True, "use_qty": True, "use_price": True}
-    layout = _compute_column_layout(flags)
+    columns = column_settings.DEFAULT_COLUMNS
+    active = _infer_active_keys(data["items"], {c["key"] for c in columns})
+    layout = _compute_column_layout(columns, active)
     supply_start = layout["supply"][0]
 
     buf = build_expense_report(data)
@@ -111,7 +119,9 @@ def test_supply_direct_entry_when_price_off():
     buf = build_expense_report(data)
     wb = openpyxl.load_workbook(buf)
     ws = wb.worksheets[0]
-    layout = _compute_column_layout({"use_spec": True, "use_unit": True, "use_qty": False, "use_price": False})
+    columns = column_settings.DEFAULT_COLUMNS
+    active = _infer_active_keys(data["items"], {c["key"] for c in columns})
+    layout = _compute_column_layout(columns, active)
     supply_letter = get_column_letter(layout["supply"][0])
     assert ws[f"{supply_letter}{FIRST_ITEM_ROW}"].value == 12345
     print("OK: test_supply_direct_entry_when_price_off")
@@ -124,7 +134,9 @@ def test_qty_price_supply_cells_populated():
     wb = openpyxl.load_workbook(buf)
     ws = wb.worksheets[0]
 
-    layout = _compute_column_layout({"use_spec": True, "use_unit": True, "use_qty": True, "use_price": True})
+    columns = column_settings.DEFAULT_COLUMNS
+    active = _infer_active_keys(data["items"], {c["key"] for c in columns})
+    layout = _compute_column_layout(columns, active)
     qty_letter = get_column_letter(layout["qty"][0])
     price_letter = get_column_letter(layout["price"][0])
     supply_letter = get_column_letter(layout["supply"][0])
@@ -255,7 +267,9 @@ def test_many_items_keeps_accounting_number_format_for_overflow_rows():
     wb = openpyxl.load_workbook(buf)
     ws = wb.worksheets[0]
 
-    layout = _compute_column_layout({"use_spec": False, "use_unit": True, "use_qty": True, "use_price": True})
+    columns = column_settings.DEFAULT_COLUMNS
+    active = _infer_active_keys(data["items"], {c["key"] for c in columns})
+    layout = _compute_column_layout(columns, active)
     qty_col, price_col, supply_col, vat_col = (
         layout["qty"][0], layout["price"][0], layout["supply"][0], layout["vat"][0]
     )

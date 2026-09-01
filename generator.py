@@ -21,6 +21,7 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
 
+import column_settings
 from paths import bundle_dir
 
 BASE_DIR = bundle_dir()
@@ -73,15 +74,26 @@ FOOTER_BLOCK_MAX_COL = PROJECT_INFO_END_COL   # AC, 블록이 쓰는 가장 오�
 # 행, 합계 금액 아래 여백 행)에도 그대로 적용해서 서식이 어긋나지 않게 한다.
 ITEM_ROW_HEIGHT = 21.75
 
-ITEM_FIELDS = [
-    ("name", "품목", 4, None),
-    ("spec", "규격", 3, "use_spec"),
-    ("unit", "단위", 2, "use_unit"),
-    ("qty", "수량", 2, "use_qty"),
-    ("price", "단가", 3, "use_price"),
-    ("supply", "공급가", 3, None),
-    ("vat", "부가세", 3, None),
-]
+NAME_KEY = "name"
+SUPPLY_KEY = "supply"
+VAT_KEY = "vat"
+
+FIXED_LABELS = {NAME_KEY: "품목", SUPPLY_KEY: "공급가", VAT_KEY: "부가세"}
+WIDE_WEIGHTS = {NAME_KEY: 6, "spec": 5, "price": 3, SUPPLY_KEY: 3, VAT_KEY: 3}
+NARROW_BUILTIN_KEYS = {"unit", "qty"}
+
+
+def _is_narrow(column_def):
+    """단위/수량, 그리고 모든 커스텀(비-builtin) 열은 셀 1칸(병합 없음)으로 고정한다."""
+    return column_def["key"] in NARROW_BUILTIN_KEYS or not column_def.get("builtin", True)
+
+
+def _infer_active_keys(items, configured_keys):
+    """설정된 열 중, 실제로 값이 있는 품목이 하나라도 있는 열만 "활성"으로 본다.
+    (app.py의 /generate 라우트가 이미 체크박스로 꺼진 필드는 item dict에 안 넣으므로,
+    여기서는 순수하게 데이터 존재 여부만 본다 - 옛 _infer_flags와 동일한 철학.)
+    """
+    return {key for key in configured_keys if any(key in item for item in items)}
 
 
 def _largest_remainder_allocation(weights, total):
@@ -95,24 +107,39 @@ def _largest_remainder_allocation(weights, total):
     return floors
 
 
-def _infer_flags(items):
-    return {
-        "use_spec": any("spec" in item for item in items),
-        "use_unit": any("unit" in item for item in items),
-        "use_qty": any("qty" in item for item in items),
-        "use_price": any("price" in item for item in items),
-    }
+def _compute_column_layout(configured_columns, active_keys):
+    """configured_columns: column_settings.load_columns() 형태의 순서 있는 리스트.
+    active_keys: _infer_active_keys()로 구한, 실제로 채워진 열의 key 집합.
 
+    반환값: {key: (start_col, end_col, label)} - name/supply/vat 포함, 1-indexed 컬럼 번호.
+    """
+    ordered = [c for c in configured_columns if c["key"] in active_keys]
+    narrow_defs = [c for c in ordered if _is_narrow(c)]
+    wide_defs = [c for c in ordered if not _is_narrow(c)]
 
-def _compute_column_layout(flags):
-    active = [f for f in ITEM_FIELDS if f[3] is None or flags.get(f[3])]
-    weights = [f[2] for f in active]
-    spans = _largest_remainder_allocation(weights, TABLE_WIDTH)
+    wide_keys = [NAME_KEY] + [c["key"] for c in wide_defs] + [SUPPLY_KEY, VAT_KEY]
+    weights = [WIDE_WEIGHTS.get(k, 3) for k in wide_keys]
+    pool = TABLE_WIDTH - len(narrow_defs)
+    spans = _largest_remainder_allocation(weights, pool)
+    wide_span_map = dict(zip(wide_keys, spans))
+
+    def label_of(key):
+        if key in FIXED_LABELS:
+            return FIXED_LABELS[key]
+        return next(c["label"] for c in configured_columns if c["key"] == key)
 
     layout = {}
     col = TABLE_START_COL
-    for (key, label, _weight, _flag), span in zip(active, spans):
-        layout[key] = (col, col + span - 1, label)
+    span = wide_span_map[NAME_KEY]
+    layout[NAME_KEY] = (col, col + span - 1, label_of(NAME_KEY))
+    col += span
+    for c in ordered:
+        span = 1 if _is_narrow(c) else wide_span_map[c["key"]]
+        layout[c["key"]] = (col, col + span - 1, label_of(c["key"]))
+        col += span
+    for key in (SUPPLY_KEY, VAT_KEY):
+        span = wide_span_map[key]
+        layout[key] = (col, col + span - 1, label_of(key))
         col += span
     return layout
 
@@ -163,17 +190,20 @@ def _rebuild_header_row(ws, layout):
         _style_span(ws, ITEM_HEADER_ROW, start, end, FONT_BOLD)
 
 
-def _write_item_row(ws, row, layout, item, supply_letter):
+def _write_item_row(ws, row, layout, item, configured_columns):
     ws.row_dimensions[row].height = ITEM_ROW_HEIGHT
     _apply_outer_frame(ws, row)
-    ws[f"{_col_letter(layout, 'name')}{row}"] = item["name"]
-    if "spec" in layout and item.get("spec"):
-        ws[f"{_col_letter(layout, 'spec')}{row}"] = item["spec"]
-    if "unit" in layout and item.get("unit"):
-        ws[f"{_col_letter(layout, 'unit')}{row}"] = item["unit"]
+    ws[f"{_col_letter(layout, 'name')}{row}"] = item.get("name", "")
+
+    plain_keys = [c["key"] for c in configured_columns if c["key"] in layout and c["key"] not in ("qty", "price")]
+    for key in plain_keys:
+        value = item.get(key)
+        if value:
+            ws[f"{_col_letter(layout, key)}{row}"] = value
 
     use_qty = "qty" in layout and item.get("qty") is not None
     use_price = "price" in layout and item.get("price") is not None
+    supply_letter = _col_letter(layout, "supply")
     if use_qty:
         qty_cell = ws[f"{_col_letter(layout, 'qty')}{row}"]
         qty_cell.value = item["qty"]
@@ -269,15 +299,16 @@ def _rebuild_item_section(ws, items):
     footer_block = _capture_footer_block(ws)
     _clear_footer_block(ws)
 
-    flags = _infer_flags(items)
-    layout = _compute_column_layout(flags)
+    configured_columns = column_settings.load_columns()
+    active_keys = _infer_active_keys(items, {c["key"] for c in configured_columns})
+    layout = _compute_column_layout(configured_columns, active_keys)
     supply_letter = _col_letter(layout, "supply")
 
     _rebuild_header_row(ws, layout)
 
     row = FIRST_ITEM_ROW
     for item in items:
-        _write_item_row(ws, row, layout, item, supply_letter)
+        _write_item_row(ws, row, layout, item, configured_columns)
         row += 1
 
     table_start_letter = get_column_letter(TABLE_START_COL)
