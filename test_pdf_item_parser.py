@@ -10,7 +10,7 @@ from pdf_item_parser import (
     find_header_row, score_table, map_table_columns, extract_items_from_table,
     resolve_duplicate_price_columns, clean_item_rows, apply_hierarchical_prefix,
     extract_paragraph_fallback, render_page_images, parse_pdf_items,
-    extract_company_name, extract_title,
+    extract_company_name, extract_title, _recover_missing_name_column,
 )
 
 SAMPLE_DIR = r"D:\claude_personal\setting_01\PDF_read"
@@ -57,6 +57,34 @@ def test_match_field_fuzzy_matches_substring_with_bullet_prefix():
     assert match_field_fuzzy("ㅇ. 공 급 가 액") is None
     assert match_field_fuzzy("ㅇ. 부 가 세") is None
     print("OK: test_match_field_fuzzy_matches_substring_with_bullet_prefix")
+
+
+def test_match_field_exact_recognizes_quantity_synonym():
+    assert match_field("Quantity") == "qty"
+    print("OK: test_match_field_exact_recognizes_quantity_synonym")
+
+
+def test_find_header_row_uses_fuzzy_fallback_for_unmatched_exact_labels():
+    # "Price(￦/M2)"는 "UNIT PRICE"/"단가"와 정확히 일치하지 않지만 "PRICE"를
+    # 부분 문자열로 포함하므로 fuzzy fallback으로 매칭돼야 한다.
+    table = [
+        ["Description", "Quantity", "Unit", "Price(￦/M2)"],
+        ["ETFE film", "2.0", "days", "6,119,375"],
+    ]
+    idx, score = find_header_row(table)
+    assert idx == 0
+    assert score == 4
+    print("OK: test_find_header_row_uses_fuzzy_fallback_for_unmatched_exact_labels")
+
+
+def test_map_table_columns_maps_quantity_and_bracketed_price_headers():
+    table = [
+        ["Description", "Quantity", "Unit", "Price(￦/M2)"],
+        ["ETFE film", "2.0", "days", "6,119,375"],
+    ]
+    result = map_table_columns(table)
+    assert result["columns"] == {"name": [0], "qty": [1], "unit": [2], "price": [3]}
+    print("OK: test_map_table_columns_maps_quantity_and_bracketed_price_headers")
 
 
 def _words(*text_left_pairs):
@@ -382,6 +410,75 @@ def test_render_page_images_returns_one_png_per_page():
     print("OK: test_render_page_images_returns_one_png_per_page")
 
 
+def test_recover_missing_name_column_fills_structurally_missing_cell():
+    from pdf_item_parser import _recover_missing_name_column
+
+    rows = [
+        [None, "Quantity", "Unit"],
+        [None, "2.0", "days"],
+    ]
+    row_cells = [
+        [None, (100, 0, 150, 20), (150, 0, 200, 20)],
+        [None, (100, 20, 150, 40), (150, 20, 200, 40)],
+    ]
+    crop_calls = []
+
+    def fake_crop(x0, top, x1, bottom):
+        crop_calls.append((x0, top, x1, bottom))
+        return {
+            (0, 0, 100, 20): "Description",
+            (0, 20, 100, 40): "ETFE film",
+        }.get((x0, top, x1, bottom))
+
+    result = _recover_missing_name_column(0, rows, row_cells, fake_crop)
+    assert result[0][0] == "Description"
+    assert result[1][0] == "ETFE film"
+    assert len(crop_calls) == 2
+    print("OK: test_recover_missing_name_column_fills_structurally_missing_cell")
+
+
+def test_recover_missing_name_column_leaves_existing_cells_untouched():
+    from pdf_item_parser import _recover_missing_name_column
+
+    rows = [["TOTAL", "", "", "999"]]
+    row_cells = [[(0, 0, 50, 20), (50, 0, 80, 20), (80, 0, 110, 20), (110, 0, 150, 20)]]
+
+    def fake_crop(*args):
+        raise AssertionError("이미 셀이 있는 행은 크롭을 호출하면 안 된다")
+
+    result = _recover_missing_name_column(0, rows, row_cells, fake_crop)
+    assert result == rows
+    print("OK: test_recover_missing_name_column_leaves_existing_cells_untouched")
+
+
+def test_recover_missing_name_column_skips_when_no_other_cells_to_bound_region():
+    from pdf_item_parser import _recover_missing_name_column
+
+    rows = [[None, None, None]]
+    row_cells = [[None, None, None]]
+
+    def fake_crop(*args):
+        raise AssertionError("경계로 쓸 다른 칸이 없으면 크롭을 호출하면 안 된다")
+
+    result = _recover_missing_name_column(0, rows, row_cells, fake_crop)
+    assert result[0][0] is None
+    print("OK: test_recover_missing_name_column_skips_when_no_other_cells_to_bound_region")
+
+
+def test_recover_missing_name_column_skips_when_crop_returns_no_text():
+    from pdf_item_parser import _recover_missing_name_column
+
+    rows = [[None, "1"]]
+    row_cells = [[None, (50, 0, 80, 20)]]
+
+    def fake_crop(x0, top, x1, bottom):
+        return None
+
+    result = _recover_missing_name_column(0, rows, row_cells, fake_crop)
+    assert result[0][0] is None
+    print("OK: test_recover_missing_name_column_skips_when_crop_returns_no_text")
+
+
 def test_parse_pdf_items_normal_table_case():
     if not os.path.isdir(SAMPLE_DIR):
         print("SKIP: test_parse_pdf_items_normal_table_case (no sample dir)")
@@ -491,6 +588,24 @@ def test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract():
     print("OK: test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract")
 
 
+def test_parse_pdf_items_recovers_borderless_name_column_with_english_headers():
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_recovers_borderless_name_column_with_english_headers (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_20260721(그린플러스_IR Cut_8월).pdf"))
+    items = result["items"]
+    assert len(items) == 2
+    assert items[0]["qty"] == 2.0
+    assert items[0]["unit"] == "days"
+    assert items[0]["price"] == 6119375.0
+    assert "ETFE" in items[0]["name"]
+    assert items[1]["qty"] == 1300.0
+    assert items[1]["unit"] == "㎡"
+    assert items[1]["price"] == 11000.0
+    assert "Nb2O5" in items[1]["name"]
+    print("OK: test_parse_pdf_items_recovers_borderless_name_column_with_english_headers")
+
+
 def test_extract_company_name_various_samples():
     if not os.path.isdir(SAMPLE_DIR):
         print("SKIP: test_extract_company_name_various_samples (no sample dir)")
@@ -566,6 +681,9 @@ if __name__ == "__main__":
     test_match_field_exact_single_line()
     test_match_field_multiline_header_checks_each_line()
     test_match_field_fuzzy_matches_substring_with_bullet_prefix()
+    test_match_field_exact_recognizes_quantity_synonym()
+    test_find_header_row_uses_fuzzy_fallback_for_unmatched_exact_labels()
+    test_map_table_columns_maps_quantity_and_bracketed_price_headers()
     test_match_field_recognizes_description_as_name()
     test_match_row_labels_merges_split_syllables()
     test_match_row_labels_skips_noise_tokens_between_syllables()
@@ -597,6 +715,10 @@ if __name__ == "__main__":
     test_extract_paragraph_fallback_finds_labelled_values()
     test_extract_paragraph_fallback_returns_none_without_name()
     test_render_page_images_returns_one_png_per_page()
+    test_recover_missing_name_column_fills_structurally_missing_cell()
+    test_recover_missing_name_column_leaves_existing_cells_untouched()
+    test_recover_missing_name_column_skips_when_no_other_cells_to_bound_region()
+    test_recover_missing_name_column_skips_when_crop_returns_no_text()
     test_parse_pdf_items_normal_table_case()
     test_parse_pdf_items_hierarchical_case()
     test_parse_pdf_items_duplicate_header_case()
@@ -604,6 +726,7 @@ if __name__ == "__main__":
     test_parse_pdf_items_scanned_pdf_uses_ocr_for_company()
     test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec()
     test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract()
+    test_parse_pdf_items_recovers_borderless_name_column_with_english_headers()
     test_extract_company_name_various_samples()
     test_extract_company_name_excludes_our_own_company()
     test_extract_title_various_samples()

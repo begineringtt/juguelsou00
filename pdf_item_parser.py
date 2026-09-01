@@ -36,8 +36,8 @@ HEADER_SYNONYMS = {
     "name": ["품명", "품 명", "공사명/품명", "물품명", "ITEM", "DESCRIPTION"],
     "spec": ["규격", "규 격", "SIZE", "형식", "규격/색상", "사양"],
     "unit": ["단위", "단 위", "UNIT"],
-    "qty": ["수량", "수 량", "Q'TY", "QTY"],
-    "price": ["단가", "단 가", "UNIT PRICE"],
+    "qty": ["수량", "수 량", "Q'TY", "QTY", "QUANTITY"],
+    "price": ["단가", "단 가", "UNIT PRICE", "PRICE"],
 }
 
 _NUMBER_RE = re.compile(r"[0-9][0-9,.\s]*[0-9]|[0-9]")
@@ -253,7 +253,7 @@ def find_header_row(table, max_scan=None):
     best_idx, best_score = None, 0
     rows = table[:max_scan] if max_scan is not None else table
     for idx, row in enumerate(rows):
-        score = sum(1 for cell in row if match_field(cell))
+        score = sum(1 for cell in row if match_field(cell) or match_field_fuzzy(cell))
         if score > best_score:
             best_idx, best_score = idx, score
     return best_idx, best_score
@@ -274,7 +274,7 @@ def map_table_columns(table):
         return None
     columns = {}
     for idx, cell in enumerate(table[header_idx]):
-        field = match_field(cell)
+        field = match_field(cell) or match_field_fuzzy(cell)
         if field:
             columns.setdefault(field, []).append(idx)
     if "name" not in columns or ("qty" not in columns and "price" not in columns):
@@ -432,10 +432,46 @@ def render_page_images(pdf_bytes, zoom=1.5):
     return images
 
 
+def _recover_missing_name_column(table_x0, rows, row_cells, crop_text_fn):
+    """열 왼쪽에 구분선이 없어서 pdfplumber의 표 추출이 품목명 칸을 통째로
+    놓치는 표를 보정한다.
+
+    row_cells[i][j]는 (x0, top, x1, bottom) 튜플 또는 None(그 위치에 셀
+    경계선 자체가 없음)이다. 첫 칸(품목명)에 셀 경계가 없는 행만, 그 행의
+    나머지 칸 중 가장 왼쪽 x0을 오른쪽 경계로 삼아 crop_text_fn으로 텍스트를
+    복구한다. 첫 칸에 이미 셀 경계가 있는 행(값이 비어 있어도)은 건드리지
+    않는다 - 구조적으로 없는 칸만 보충하는 것이 목적이다.
+    """
+    recovered = [list(row) for row in rows]
+    for row, cells in zip(recovered, row_cells):
+        if not cells or cells[0] is not None:
+            continue
+        populated = [c for c in cells[1:] if c is not None]
+        if not populated:
+            continue
+        name_x1 = min(c[0] for c in populated)
+        if name_x1 <= table_x0:
+            continue
+        _, top, _, bottom = populated[0]
+        text = crop_text_fn(table_x0, top, name_x1, bottom)
+        if text:
+            row[0] = text.strip()
+    return recovered
+
+
 def _find_best_table(pdf):
     best_table, best_score = None, 0
     for page in pdf.pages:
-        for table in page.extract_tables():
+        for plumber_table in page.find_tables():
+            table_x0 = plumber_table.bbox[0]
+            row_cells = [row.cells for row in plumber_table.rows]
+
+            def crop_text_fn(x0, top, x1, bottom, page=page):
+                return page.crop((x0, top, x1, bottom)).extract_text()
+
+            table = _recover_missing_name_column(
+                table_x0, plumber_table.extract(), row_cells, crop_text_fn
+            )
             score = score_table(table)
             if score > best_score:
                 best_table, best_score = table, score
