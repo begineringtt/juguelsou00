@@ -206,27 +206,40 @@ def normalize_header(text):
     return text.strip().upper()
 
 
-def match_field(header_text):
+def _merge_synonyms(synonyms):
+    """synonyms는 기존 HEADER_SYNONYMS에 "추가"되는 커스텀 동의어로 취급한다
+    (완전히 대체하는 게 아니라 병합한다) - 그래야 extra_fields로 커스텀 필드
+    하나만 넘겨도 품명/수량/단가 같은 기본 필드 인식이 사라지지 않는다."""
+    if not synonyms:
+        return HEADER_SYNONYMS
+    merged = dict(HEADER_SYNONYMS)
+    merged.update(synonyms)
+    return merged
+
+
+def match_field(header_text, synonyms=None):
     if not header_text:
         return None
+    synonyms = _merge_synonyms(synonyms)
     for line in str(header_text).split("\n"):
         normalized = normalize_header(line)
         if not normalized:
             continue
-        for field, synonyms in HEADER_SYNONYMS.items():
-            for syn in synonyms:
+        for field, syns in synonyms.items():
+            for syn in syns:
                 if normalize_header(syn) == normalized:
                     return field
     return None
 
 
-def match_field_fuzzy(label_text):
+def match_field_fuzzy(label_text, synonyms=None):
     normalized = normalize_header(label_text)
     if not normalized:
         return None
+    synonyms = _merge_synonyms(synonyms)
     best_field, best_len = None, 0
-    for field, synonyms in HEADER_SYNONYMS.items():
-        for syn in synonyms:
+    for field, syns in synonyms.items():
+        for syn in syns:
             syn_norm = normalize_header(syn)
             if syn_norm and syn_norm in normalized and len(syn_norm) > best_len:
                 best_field, best_len = field, len(syn_norm)
@@ -249,32 +262,32 @@ def parse_number(text):
 
 # max_scan is unused by any current caller (both call sites scan the whole
 # table) — kept as an escape hatch if a future table ever needs capping.
-def find_header_row(table, max_scan=None):
+def find_header_row(table, max_scan=None, synonyms=None):
     best_idx, best_score = None, 0
     rows = table[:max_scan] if max_scan is not None else table
     for idx, row in enumerate(rows):
-        score = sum(1 for cell in row if match_field(cell) or match_field_fuzzy(cell))
+        score = sum(1 for cell in row if match_field(cell, synonyms=synonyms) or match_field_fuzzy(cell, synonyms=synonyms))
         if score > best_score:
             best_idx, best_score = idx, score
     return best_idx, best_score
 
 
-def score_table(table):
+def score_table(table, synonyms=None):
     if not table:
         return 0
-    _, score = find_header_row(table)
+    _, score = find_header_row(table, synonyms=synonyms)
     return score
 
 
-def map_table_columns(table):
+def map_table_columns(table, synonyms=None):
     if not table:
         return None
-    header_idx, _ = find_header_row(table)
+    header_idx, _ = find_header_row(table, synonyms=synonyms)
     if header_idx is None:
         return None
     columns = {}
     for idx, cell in enumerate(table[header_idx]):
-        field = match_field(cell) or match_field_fuzzy(cell)
+        field = match_field(cell, synonyms=synonyms) or match_field_fuzzy(cell, synonyms=synonyms)
         if field:
             columns.setdefault(field, []).append(idx)
     if "name" not in columns or ("qty" not in columns and "price" not in columns):
@@ -282,18 +295,21 @@ def map_table_columns(table):
     return {"columns": columns, "data_start": header_idx + 1}
 
 
-def _header_cell_leftover(cell_text):
+def _header_cell_leftover(cell_text, synonyms=None):
     if not cell_text:
         return ""
     lines = str(cell_text).split("\n")
     last_label_idx = -1
     for idx, line in enumerate(lines):
-        if match_field(line):
+        if match_field(line, synonyms=synonyms):
             last_label_idx = idx
     return "\n".join(lines[last_label_idx + 1:]).strip()
 
 
-def extract_items_from_table(table, mapping):
+FIXED_TABLE_FIELDS = {"name", "spec", "unit", "qty", "price"}
+
+
+def extract_items_from_table(table, mapping, synonyms=None):
     columns = mapping["columns"]
 
     def first_col(field):
@@ -305,6 +321,7 @@ def extract_items_from_table(table, mapping):
     unit_col = first_col("unit")
     qty_col = first_col("qty")
     price_cols = columns.get("price", [])
+    extra_cols = {field: first_col(field) for field in columns if field not in FIXED_TABLE_FIELDS}
 
     def cell(row, col):
         if col is None or col >= len(row):
@@ -316,7 +333,7 @@ def extract_items_from_table(table, mapping):
     leftover = {}
     for indices in columns.values():
         for idx in indices:
-            text = _header_cell_leftover(header_row[idx] if idx < len(header_row) else "")
+            text = _header_cell_leftover(header_row[idx] if idx < len(header_row) else "", synonyms=synonyms)
             if text:
                 leftover[idx] = text
 
@@ -330,13 +347,18 @@ def extract_items_from_table(table, mapping):
         name = cell(raw_row, name_col)
         if not name:
             continue
-        rows.append({
+        row = {
             "name": name,
             "spec": cell(raw_row, spec_col),
             "unit": cell(raw_row, unit_col),
             "qty_raw": cell(raw_row, qty_col),
             "price_raws": [cell(raw_row, c) for c in price_cols],
-        })
+        }
+        for field, col in extra_cols.items():
+            value = cell(raw_row, col)
+            if value:
+                row[field] = value
+        rows.append(row)
     return rows
 
 
@@ -357,13 +379,17 @@ def resolve_duplicate_price_columns(rows):
     resolved = []
     for row in rows:
         qty = parse_number(row["qty_raw"])
-        resolved.append({
+        resolved_row = {
             "name": row["name"],
             "spec": row["spec"],
             "unit": row["unit"],
             "qty": qty,
             "price": _pick_price(qty, row["price_raws"]),
-        })
+        }
+        for key, value in row.items():
+            if key not in ("name", "spec", "unit", "qty_raw", "price_raws"):
+                resolved_row[key] = value
+        resolved.append(resolved_row)
     return resolved
 
 
@@ -395,14 +421,14 @@ def apply_hierarchical_prefix(rows):
     return result
 
 
-def extract_paragraph_fallback(text):
+def extract_paragraph_fallback(text, synonyms=None):
     found = {}
     for line in text.split("\n"):
         sep = ":" if ":" in line else ("：" if "：" in line else None)
         if sep is None:
             continue
         label, _, value = line.partition(sep)
-        field = match_field_fuzzy(label)
+        field = match_field_fuzzy(label, synonyms=synonyms)
         if not field or field in found:
             continue
         value = value.strip()
@@ -410,13 +436,17 @@ def extract_paragraph_fallback(text):
             found[field] = value
     if "name" not in found:
         return None
-    return {
+    result = {
         "name": found.get("name", ""),
         "spec": found.get("spec", ""),
         "unit": found.get("unit", ""),
         "qty": parse_number(found.get("qty")),
         "price": parse_number(found.get("price")),
     }
+    for field, value in found.items():
+        if field not in result:
+            result[field] = value
+    return result
 
 
 def render_page_images(pdf_bytes, zoom=1.5):
@@ -459,7 +489,7 @@ def _recover_missing_name_column(table_x0, rows, row_cells, crop_text_fn):
     return recovered
 
 
-def _find_best_table(pdf):
+def _find_best_table(pdf, synonyms=None):
     best_table, best_score = None, 0
     for page in pdf.pages:
         for plumber_table in page.find_tables():
@@ -472,7 +502,7 @@ def _find_best_table(pdf):
             table = _recover_missing_name_column(
                 table_x0, plumber_table.extract(), row_cells, crop_text_fn
             )
-            score = score_table(table)
+            score = score_table(table, synonyms=synonyms)
             if score > best_score:
                 best_table, best_score = table, score
     return best_table
@@ -561,7 +591,7 @@ def _cluster_words_into_rows(words):
 _NOISE_TOKEN_RE = re.compile(r"^[|_.,:;·•\-~`'\"]+$")
 
 
-def _could_seed_label(token_text):
+def _could_seed_label(token_text, synonyms=None):
     """이 토큰이 실제 라벨(품명/규격/...)의 일부일 가능성이 있는지 본다.
 
     행 번호("No")처럼 라벨과 무관한 토큰이 이어붙이기 시작점이 되어, 뒤따르는
@@ -569,17 +599,18 @@ def _could_seed_label(token_text):
     막기 위한 필터다 (예: "No"+"품"+"명" -> "No품명"도 "품명"을 부분 문자열로
     포함하므로 필터 없이는 "No" 위치가 품명 열로 오인식된다).
     """
+    synonyms = _merge_synonyms(synonyms)
     normalized = normalize_header(token_text)
     if not normalized:
         return False
-    for synonyms in HEADER_SYNONYMS.values():
-        for syn in synonyms:
+    for syns in synonyms.values():
+        for syn in syns:
             if normalized in normalize_header(syn):
                 return True
     return False
 
 
-def _label_field_for_prefix(normalized_prefix):
+def _label_field_for_prefix(normalized_prefix, synonyms=None):
     """normalized_prefix가 어떤 라벨과 (접두사로) 정확히 일치하는지 본다.
 
     match_field_fuzzy의 "부분 문자열 포함" 판정은 여기서는 쓰지 않는다 - 그
@@ -588,16 +619,17 @@ def _label_field_for_prefix(normalized_prefix):
     버리는 오탐이 생긴다. 접두사 일치로 제한하면 이어붙이기가 실제로 시작
     지점(seed)에 해당하는 라벨만 완성했을 때만 매칭된다.
     """
+    synonyms = _merge_synonyms(synonyms)
     best_field, best_len = None, 0
-    for field, synonyms in HEADER_SYNONYMS.items():
-        for syn in synonyms:
+    for field, syns in synonyms.items():
+        for syn in syns:
             syn_norm = normalize_header(syn)
             if syn_norm and normalized_prefix.startswith(syn_norm) and len(syn_norm) > best_len:
                 best_field, best_len = field, len(syn_norm)
     return best_field
 
 
-def _match_row_labels(words, max_window=3):
+def _match_row_labels(words, max_window=3, synonyms=None):
     """행의 OCR 단어들 중 품명/규격/수량/단가 등 헤더 라벨을 찾는다.
 
     Tesseract가 한글 라벨을 음절 단위로 쪼개 별도 "단어"로 인식하는 경우가
@@ -608,7 +640,7 @@ def _match_row_labels(words, max_window=3):
     fields = {}
     n = len(words)
     for start in range(n):
-        if not _could_seed_label(words[start]["text"]):
+        if not _could_seed_label(words[start]["text"], synonyms=synonyms):
             continue
         concatenated = ""
         real_count = 0
@@ -618,7 +650,7 @@ def _match_row_labels(words, max_window=3):
             if not _NOISE_TOKEN_RE.match(token):
                 concatenated += token
                 real_count += 1
-                field = _label_field_for_prefix(normalize_header(concatenated))
+                field = _label_field_for_prefix(normalize_header(concatenated), synonyms=synonyms)
                 if field:
                     fields.setdefault(field, []).append(words[start]["left"])
                     break
@@ -626,7 +658,7 @@ def _match_row_labels(words, max_window=3):
     return fields
 
 
-def _find_ocr_header_row(rows):
+def _find_ocr_header_row(rows, synonyms=None):
     """행들 중 품명/규격/수량/단가 등 라벨이 가장 많이 매칭되는 행을 찾는다.
 
     OCR 결과는 오탈자가 섞이기 쉬워서 정확 일치(match_field)가 아니라 부분 일치
@@ -634,7 +666,7 @@ def _find_ocr_header_row(rows):
     """
     best_idx, best_fields, best_score = None, None, 0
     for idx, row in enumerate(rows):
-        fields = _match_row_labels(row["words"])
+        fields = _match_row_labels(row["words"], synonyms=synonyms)
         if "name" in fields and len(fields) > best_score:
             best_idx, best_fields, best_score = idx, fields, len(fields)
     return best_idx, best_fields
@@ -664,7 +696,7 @@ def _build_table_from_ocr_rows(rows, header_idx, header_fields):
     return table, {"columns": columns, "data_start": 1}
 
 
-def ocr_extract_items(pil_image):
+def ocr_extract_items(pil_image, synonyms=None):
     """스캔 페이지 이미지에서 OCR로 품목 표를 재구성해본다. 헤더 라벨을 못 찾거나
     수량/단가 열이 전혀 없으면 None (표를 못 찾은 것으로 보고 상위에서 다른 방법으로
     대체하도록 한다)."""
@@ -675,7 +707,7 @@ def ocr_extract_items(pil_image):
         raise OCRUnavailableError(str(exc)) from exc
 
     rows = _cluster_words_into_rows(words)
-    header_idx, header_fields = _find_ocr_header_row(rows)
+    header_idx, header_fields = _find_ocr_header_row(rows, synonyms=synonyms)
     if header_idx is None:
         return None
 
@@ -690,7 +722,7 @@ def ocr_extract_items(pil_image):
     # 만들어버린다. OCR 표에는 이 융합 케이스가 없으므로 헤더 행을 비워서 막는다.
     table[0] = ["" for _ in table[0]]
 
-    raw_rows = extract_items_from_table(table, mapping)
+    raw_rows = extract_items_from_table(table, mapping, synonyms=synonyms)
     resolved_rows = resolve_duplicate_price_columns(raw_rows)
     cleaned_rows = clean_item_rows(resolved_rows)
     return apply_hierarchical_prefix(cleaned_rows)
@@ -727,7 +759,7 @@ def _extract_large_embedded_images(pdf_bytes, min_area_ratio=0.15):
     return images
 
 
-def _parse_scanned_pdf(pdf_bytes, warnings):
+def _parse_scanned_pdf(pdf_bytes, warnings, synonyms=None):
     try:
         ocr_pages = _render_pages_for_ocr(pdf_bytes)
         ocr_full_text = "\n".join(ocr_page_text(img) for img in ocr_pages)
@@ -738,14 +770,14 @@ def _parse_scanned_pdf(pdf_bytes, warnings):
 
         items = None
         for img in candidate_images:
-            items = ocr_extract_items(img)
+            items = ocr_extract_items(img, synonyms=synonyms)
             if items:
                 break
 
         if items:
             pass
         else:
-            fallback_item = extract_paragraph_fallback(ocr_full_text)
+            fallback_item = extract_paragraph_fallback(ocr_full_text, synonyms=synonyms)
             if fallback_item:
                 items = [fallback_item]
                 warnings.append("표를 찾지 못해 OCR로 일부 항목만 인식했습니다. 나머지는 직접 입력해주세요.")
@@ -762,7 +794,12 @@ def _parse_scanned_pdf(pdf_bytes, warnings):
         return [], None, None
 
 
-def parse_pdf_items(pdf_bytes):
+def parse_pdf_items(pdf_bytes, extra_fields=None):
+    synonyms = HEADER_SYNONYMS
+    if extra_fields:
+        synonyms = dict(HEADER_SYNONYMS)
+        synonyms.update(extra_fields)
+
     warnings = []
     page_images = render_page_images(pdf_bytes)
 
@@ -770,7 +807,7 @@ def parse_pdf_items(pdf_bytes):
         full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
 
         if not full_text.strip():
-            items, company, title = _parse_scanned_pdf(pdf_bytes, warnings)
+            items, company, title = _parse_scanned_pdf(pdf_bytes, warnings, synonyms=synonyms)
             return {
                 "items": items,
                 "page_images": page_images,
@@ -782,16 +819,16 @@ def parse_pdf_items(pdf_bytes):
         company = extract_company_name(full_text)
         title = extract_title(full_text)
 
-        best_table = _find_best_table(pdf)
-        mapping = map_table_columns(best_table) if best_table else None
+        best_table = _find_best_table(pdf, synonyms=synonyms)
+        mapping = map_table_columns(best_table, synonyms=synonyms) if best_table else None
 
         if mapping:
-            raw_rows = extract_items_from_table(best_table, mapping)
+            raw_rows = extract_items_from_table(best_table, mapping, synonyms=synonyms)
             resolved_rows = resolve_duplicate_price_columns(raw_rows)
             cleaned_rows = clean_item_rows(resolved_rows)
             items = apply_hierarchical_prefix(cleaned_rows)
         else:
-            fallback_item = extract_paragraph_fallback(full_text)
+            fallback_item = extract_paragraph_fallback(full_text, synonyms=synonyms)
             if fallback_item:
                 items = [fallback_item]
                 warnings.append("표를 찾지 못해 일부 항목만 인식했습니다. 나머지는 직접 입력해주세요.")

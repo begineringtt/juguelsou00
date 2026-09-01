@@ -676,6 +676,54 @@ def test_extract_title_does_not_duplicate_existing_case_suffix():
     print("OK: test_extract_title_does_not_duplicate_existing_case_suffix")
 
 
+def test_map_table_columns_recognizes_custom_synonym():
+    table = [
+        ["품명", "규격", "수량", "중량", "단가"],
+        ["AL바", "100x5", "5", "25kg", "7400"],
+    ]
+    result = map_table_columns(table, synonyms={"weight": ["중량"]})
+    assert result["columns"]["weight"] == [3]
+    print("OK: test_map_table_columns_recognizes_custom_synonym")
+
+
+def test_extract_items_from_table_passes_through_custom_column():
+    table = [
+        ["품명", "규격", "수량", "중량", "단가"],
+        ["AL바", "100x5", "5", "25kg", "7400"],
+    ]
+    synonyms = {"weight": ["중량"]}
+    mapping = map_table_columns(table, synonyms=synonyms)
+    rows = extract_items_from_table(table, mapping, synonyms=synonyms)
+    assert rows[0]["weight"] == "25kg"
+    resolved = resolve_duplicate_price_columns(rows)
+    assert resolved[0]["weight"] == "25kg"
+    assert resolved[0]["price"] == 7400.0
+    print("OK: test_extract_items_from_table_passes_through_custom_column")
+
+
+def test_parse_pdf_items_without_extra_fields_is_unaffected():
+    # extra_fields를 안 넘기면(기존 호출부) 기존 동작 그대로여야 한다.
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_without_extra_fields_is_unaffected (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_test.pdf"))
+    assert result["items"]
+    print("OK: test_parse_pdf_items_without_extra_fields_is_unaffected")
+
+
+def test_parse_pdf_items_extra_fields_does_not_break_scanned_pdf_pipeline():
+    # 알루스퀘어 PDF(OCR 경로)에 extra_fields를 넘겨도 파이프라인이 깨지지 않고,
+    # 기존 회귀 테스트(품명/규격 인식)와 동일하게 최소 2개 품목이 나와야 한다.
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_extra_fields_does_not_break_scanned_pdf_pipeline (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_알루스퀘어.pdf"), extra_fields={"weight": ["중량"]})
+    assert len(result["items"]) == 2
+    for item in result["items"]:
+        assert "AL" in item["name"]
+    print("OK: test_parse_pdf_items_extra_fields_does_not_break_scanned_pdf_pipeline")
+
+
 if __name__ == "__main__":
     test_normalize_header_strips_whitespace_and_uppercases()
     test_match_field_exact_single_line()
@@ -733,4 +781,8 @@ if __name__ == "__main__":
     test_extract_title_handles_korean_hanja_and_english_labels()
     test_extract_title_truncates_at_trailing_contact_info()
     test_extract_title_does_not_duplicate_existing_case_suffix()
+    test_map_table_columns_recognizes_custom_synonym()
+    test_extract_items_from_table_passes_through_custom_column()
+    test_parse_pdf_items_without_extra_fields_is_unaffected()
+    test_parse_pdf_items_extra_fields_does_not_break_scanned_pdf_pipeline()
     print("ALL PASSED")
