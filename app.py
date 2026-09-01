@@ -3,6 +3,7 @@ import webbrowser
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 
+import column_settings
 import history_store
 import read_seed
 from generator import build_expense_report, suggest_filename
@@ -20,6 +21,7 @@ def index():
         "index.html",
         history=history_store.load_history(),
         projects=projects,
+        columns=column_settings.load_columns(),
         refreshed=request.args.get("refreshed"),
         added=request.args.get("added"),
     )
@@ -79,13 +81,63 @@ def refresh_read_seed():
     return redirect(url_for("index", refreshed=1, added=total_added))
 
 
+@app.route("/column_settings", methods=["GET"])
+def get_column_settings():
+    return jsonify({"columns": column_settings.load_columns()})
+
+
+@app.route("/column_settings", methods=["POST"])
+def save_column_settings_route():
+    payload = request.get_json(silent=True) or {}
+    columns = payload.get("columns")
+    if not isinstance(columns, list):
+        return jsonify({"error": "columns가 필요합니다."}), 400
+    column_settings.save_columns(columns)
+    return jsonify({"columns": columns})
+
+
+@app.route("/column_settings/add", methods=["POST"])
+def add_column_setting():
+    label = request.form.get("label", "").strip()
+    if not label:
+        return jsonify({"error": "항목 이름을 입력해주세요."}), 400
+    entry = column_settings.add_custom_column(label)
+    return jsonify({"column": entry, "columns": column_settings.load_columns()})
+
+
+@app.route("/column_settings/enable", methods=["POST"])
+def set_column_enabled_route():
+    key = request.form.get("key", "")
+    if not key:
+        return jsonify({"error": "key가 필요합니다."}), 400
+    enabled = request.form.get("enabled") == "1"
+    columns = column_settings.set_column_enabled(key, enabled)
+    return jsonify({"columns": columns})
+
+
+@app.route("/column_settings/delete", methods=["POST"])
+def delete_column_setting():
+    key = request.form.get("key", "")
+    if not key:
+        return jsonify({"error": "key가 필요합니다."}), 400
+    deleted = column_settings.delete_column(key)
+    if not deleted:
+        return jsonify({"error": "삭제할 수 없는 항목입니다."}), 400
+    return jsonify({"columns": column_settings.load_columns()})
+
+
 @app.route("/parse_pdf", methods=["POST"])
 def parse_pdf():
     file = request.files.get("file")
     if not file:
         return jsonify({"error": "파일이 없습니다."}), 400
+    extra_fields = {
+        c["key"]: [c["label"]]
+        for c in column_settings.load_columns()
+        if not c.get("builtin") and c.get("enabled")
+    }
     try:
-        result = parse_pdf_items(file.read())
+        result = parse_pdf_items(file.read(), extra_fields=extra_fields or None)
     except Exception:
         return jsonify({"error": "PDF를 읽을 수 없습니다. 파일이 손상되었거나 PDF 형식이 아닐 수 있습니다."}), 400
     return jsonify(result)
@@ -94,35 +146,33 @@ def parse_pdf():
 @app.route("/generate", methods=["POST"])
 def generate():
     form = request.form
-
-    use_spec = "use_spec" in form
-    use_unit = "use_unit" in form
-    use_qty = "use_qty" in form
-    use_price = "use_price" in form
+    columns = column_settings.load_columns()
 
     names = form.getlist("item_name[]")
-    specs = form.getlist("item_spec[]")
-    units = form.getlist("item_unit[]")
-    qtys = form.getlist("item_qty[]")
-    prices = form.getlist("item_price[]")
     supplies = form.getlist("item_supply[]")
+    active_values = {
+        c["key"]: form.getlist(f"item_{c['key']}[]")
+        for c in columns
+        if f"use_{c['key']}" in form
+    }
 
     items = []
     try:
-        for name, spec, unit, qty, price, supply in zip(names, specs, units, qtys, prices, supplies):
+        for idx, name in enumerate(names):
             if not name.strip():
                 continue
             item = {"name": name.strip()}
-            if use_spec:
-                item["spec"] = spec.strip()
-            if use_unit:
-                item["unit"] = unit.strip()
-            if use_qty:
-                item["qty"] = float(qty) if qty.strip() else 0
-            if use_price:
-                item["price"] = float(price) if price.strip() else 0
-            else:
-                item["supply"] = float(supply) if supply.strip() else 0
+            for key, values in active_values.items():
+                raw = values[idx] if idx < len(values) else ""
+                if key == "qty":
+                    item["qty"] = float(raw) if raw.strip() else 0
+                elif key == "price":
+                    item["price"] = float(raw) if raw.strip() else 0
+                else:
+                    item[key] = raw.strip()
+            if "price" not in item:
+                supply_raw = supplies[idx] if idx < len(supplies) else ""
+                item["supply"] = float(supply_raw) if supply_raw.strip() else 0
             items.append(item)
     except ValueError:
         return "수량/단가/공급가는 숫자로 입력해주세요.", 400

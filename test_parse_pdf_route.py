@@ -20,7 +20,7 @@ def test_parse_pdf_route_returns_json_with_expected_keys():
     resp = client.post("/parse_pdf", data=data, content_type="multipart/form-data")
     assert resp.status_code == 200
     body = resp.get_json()
-    assert set(body.keys()) == {"items", "page_images", "warnings"}
+    assert set(body.keys()) == {"items", "page_images", "warnings", "company", "title"}
     assert isinstance(body["items"], list)
     assert len(body["page_images"]) == 1
     print("OK: test_parse_pdf_route_returns_json_with_expected_keys")
