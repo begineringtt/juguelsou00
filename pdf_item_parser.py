@@ -927,11 +927,12 @@ def _flag_arithmetic_mismatches(items, tolerance_ratio=0.01, tolerance_abs=1.0):
 
 def _ocr_extract_items_via_grid(pil_image, synonyms=None):
     """격자선(표 테두리)을 검출해 셀 단위로 정확히 잘라 OCR하는 경로. 격자를
-    못 찾거나 헤더/수량/단가를 못 찾으면 None."""
+    못 찾거나 헤더/수량/단가를 못 찾으면 (None, None). 성공하면 (items, mapping) -
+    mapping은 화면에서 PDF의 실제 열 순서를 반영하는 데 쓰인다."""
     table = _build_table_from_grid(pil_image, synonyms=synonyms)
     mapping = map_table_columns(table, synonyms=synonyms) if table else None
     if not mapping or ("qty" not in mapping["columns"] and "price" not in mapping["columns"]):
-        return None
+        return None, None
 
     # _build_table_from_grid()가 만든 표는 항상 0번째 행이 헤더다.
     # extract_items_from_table()의 "헤더 셀에 다음 데이터가 같이 붙어 있으면
@@ -945,21 +946,22 @@ def _ocr_extract_items_via_grid(pil_image, synonyms=None):
     resolved_rows = resolve_duplicate_price_columns(raw_rows)
     cleaned_rows = clean_item_rows(resolved_rows)
     items = apply_hierarchical_prefix(cleaned_rows)
-    return items or None
+    return (items, mapping) if items else (None, None)
 
 
 def _ocr_extract_items_via_word_anchors(pil_image, synonyms=None):
     """격자선이 없는(또는 못 찾은) 표를 위한 기존 방식: 헤더 라벨의 x좌표를
-    기준점 삼아 단어를 가장 가까운 기준점에 배정해서 표를 재구성한다."""
+    기준점 삼아 단어를 가장 가까운 기준점에 배정해서 표를 재구성한다.
+    성공하면 (items, mapping), 실패하면 (None, None)."""
     words = _ocr_words(pil_image)
     rows = _cluster_words_into_rows(words)
     header_idx, header_fields = _find_ocr_header_row(rows, synonyms=synonyms)
     if header_idx is None:
-        return None
+        return None, None
 
     table, mapping = _build_table_from_ocr_rows(rows, header_idx, header_fields)
     if "qty" not in mapping["columns"] and "price" not in mapping["columns"]:
-        return None
+        return None, None
 
     # extract_items_from_table()의 "헤더 셀에 다음 데이터가 같이 붙어 있으면
     # 살려낸다" 로직은 pdfplumber가 뽑아낸, 노이즈 없는 표 셀을 전제로 한다.
@@ -971,13 +973,16 @@ def _ocr_extract_items_via_word_anchors(pil_image, synonyms=None):
     raw_rows = extract_items_from_table(table, mapping, synonyms=synonyms)
     resolved_rows = resolve_duplicate_price_columns(raw_rows)
     cleaned_rows = clean_item_rows(resolved_rows)
-    return apply_hierarchical_prefix(cleaned_rows)
+    items = apply_hierarchical_prefix(cleaned_rows)
+    return (items, mapping) if items else (None, None)
 
 
 def ocr_extract_items(pil_image, synonyms=None):
-    """스캔 페이지 이미지에서 OCR로 품목 표를 재구성해본다. 헤더 라벨을 못 찾거나
-    수량/단가 열이 전혀 없으면 None (표를 못 찾은 것으로 보고 상위에서 다른 방법으로
-    대체하도록 한다).
+    """스캔 페이지 이미지에서 OCR로 품목 표를 재구성해본다. (items, mapping)을
+    반환한다 - 헤더 라벨을 못 찾거나 수량/단가 열이 전혀 없으면 (None, None) (표를
+    못 찾은 것으로 보고 상위에서 다른 방법으로 대체하도록 한다). mapping은 화면에서
+    PDF의 실제 열 순서(품명/규격/수량/중량/단위/단가/공급가액 등)를 그대로
+    반영하는 데 쓰인다.
 
     먼저 표 격자선을 검출해 셀 단위로 정확히 잘라 OCR하는 방식을 시도하고,
     격자(테두리선)가 없어서 못 찾거나 그 경로에서 품목을 못 뽑으면 기존의
@@ -985,15 +990,15 @@ def ocr_extract_items(pil_image, synonyms=None):
     """
     _configure_tesseract()
     try:
-        items = _ocr_extract_items_via_grid(pil_image, synonyms=synonyms)
+        items, mapping = _ocr_extract_items_via_grid(pil_image, synonyms=synonyms)
         if items is None:
-            items = _ocr_extract_items_via_word_anchors(pil_image, synonyms=synonyms)
+            items, mapping = _ocr_extract_items_via_word_anchors(pil_image, synonyms=synonyms)
     except pytesseract.TesseractNotFoundError as exc:
         raise OCRUnavailableError(str(exc)) from exc
 
     if not items:
-        return items
-    return _flag_arithmetic_mismatches(items)
+        return items, None
+    return _flag_arithmetic_mismatches(items), mapping
 
 
 def _extract_large_embedded_images(pdf_bytes, min_area_ratio=0.15):
@@ -1039,9 +1044,9 @@ def _parse_scanned_pdf(pdf_bytes, warnings, synonyms=None):
         embedded_images = [_preprocess_for_ocr(img) for img in _extract_large_embedded_images(pdf_bytes)]
         candidate_images = ocr_pages + embedded_images
 
-        items = None
+        items, mapping = None, None
         for img in candidate_images:
-            items = ocr_extract_items(img, synonyms=synonyms)
+            items, mapping = ocr_extract_items(img, synonyms=synonyms)
             if items:
                 break
 
@@ -1062,10 +1067,10 @@ def _parse_scanned_pdf(pdf_bytes, warnings, synonyms=None):
         warnings.append(
             "스캔(이미지) PDF라서 OCR로 인식했습니다. 인식 결과가 원본과 다를 수 있으니 꼭 확인해주세요."
         )
-        return items, company, title
+        return items, company, title, _detect_field_order(mapping)
     except OCRUnavailableError:
         warnings.append("OCR 엔진을 찾을 수 없어 스캔 PDF를 인식하지 못했습니다. 미리보기 이미지를 보고 직접 입력해주세요.")
-        return [], None, None
+        return [], None, None, None
 
 
 def _detect_field_order(mapping):
@@ -1091,14 +1096,14 @@ def parse_pdf_items(pdf_bytes, extra_fields=None):
         full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
 
         if not full_text.strip():
-            items, company, title = _parse_scanned_pdf(pdf_bytes, warnings, synonyms=synonyms)
+            items, company, title, field_order = _parse_scanned_pdf(pdf_bytes, warnings, synonyms=synonyms)
             return {
                 "items": items,
                 "page_images": page_images,
                 "warnings": warnings,
                 "company": company,
                 "title": title,
-                "field_order": None,
+                "field_order": field_order,
             }
 
         company = extract_company_name(full_text)

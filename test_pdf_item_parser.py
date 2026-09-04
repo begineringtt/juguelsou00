@@ -729,6 +729,9 @@ def test_parse_pdf_items_scanned_pdf_grid_path_recovers_qty_weight_and_price():
     # 공급가 = 중량 x 단가로 검산이 맞아떨어지므로 두 행 다 플래그가 없어야 한다.
     assert not items[0].get("_flagged")
     assert not items[1].get("_flagged")
+    # PDF에 실제로 인쇄된 열 순서(규격/수량/중량/단위/단가/공급가액)를 그대로
+    # 반영해야, 화면에서 품목 표 열 순서를 PDF와 맞출 수 있다.
+    assert result["field_order"][:5] == ["spec", "qty", "weight", "unit", "price"]
     print("OK: test_parse_pdf_items_scanned_pdf_grid_path_recovers_qty_weight_and_price")
 
 
