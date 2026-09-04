@@ -3,7 +3,9 @@ import io
 import os
 import re
 
+import cv2
 import fitz
+import numpy as np
 import pdfplumber
 import pytesseract
 from PIL import Image
@@ -11,6 +13,11 @@ from PIL import Image
 import paths
 
 OCR_LANG = "kor+eng"
+
+# 스캔 PDF를 렌더링할 목표 해상도. 기존 zoom=3.0(72DPI 기준 약 216DPI)은 표 안의
+# 작은 숫자/한글이 뭉개지기 쉬워서, Tesseract 권장 범위(300~400DPI)로 올린다.
+OCR_DPI = 350
+_PDF_BASE_DPI = 72
 
 _tesseract_configured = False
 
@@ -39,6 +46,11 @@ HEADER_SYNONYMS = {
     "qty": ["수량", "수 량", "Q'TY", "QTY", "QUANTITY"],
     "price": ["단가", "단 가", "UNIT PRICE", "PRICE"],
     "weight": ["중량", "중 량", "중량(KG)", "무게", "WEIGHT", "W'T", "WT"],
+    # printed_supply/printed_vat: 견적서에 인쇄된 공급가/부가세 열. items 스키마의
+    # "supply"(가격 미사용 시 직접입력 공급가)와 이름이 겹치면 안 되므로 다른 키를
+    # 쓴다 - _flag_arithmetic_mismatches()에서 수량x단가 검산용으로만 쓰인다.
+    "printed_supply": ["공급가", "공급가액", "공급 가액", "금액", "AMOUNT", "SUPPLY"],
+    "printed_vat": ["부가세", "부가가치세", "부 가 세", "VAT"],
 }
 
 _NUMBER_RE = re.compile(r"[0-9][0-9,.\s]*[0-9]|[0-9]")
@@ -199,11 +211,17 @@ def extract_title(text):
     return None
 
 
+_HEADER_NOISE_CHARS_RE = re.compile(r"[|_.,:;·•\-~`'\"]")
+
+
 def normalize_header(text):
     if text is None:
         return ""
     text = str(text).replace("\n", " ")
     text = re.sub(r"\s+", "", text)
+    # 셀 경계선 잔여물 등으로 라벨 사이에 끼어드는 잡음 문자(구두점류)를 제거한다.
+    # 동의어 쪽도 같은 함수로 정규화되므로("Q'TY" -> "QTY") 매칭에는 영향이 없다.
+    text = _HEADER_NOISE_CHARS_RE.sub("", text)
     return text.strip().upper()
 
 
@@ -388,20 +406,27 @@ def resolve_duplicate_price_columns(rows):
             "price": _pick_price(qty, row["price_raws"]),
         }
         for key, value in row.items():
-            if key not in ("name", "spec", "unit", "qty_raw", "price_raws"):
+            if key in ("name", "spec", "unit", "qty_raw", "price_raws"):
+                continue
+            if key == "weight" and isinstance(value, str):
+                resolved_row[key] = parse_number(value)
+            else:
                 resolved_row[key] = value
         resolved.append(resolved_row)
     return resolved
 
 
-SUMMARY_KEYWORDS = ["합계", "소계", "이하", "총액", "TOTAL", "SUB TOTAL", "TAX", "REMARK"]
+SUMMARY_KEYWORDS = ["합계", "소계", "이하", "총액", "TOTAL", "SUB TOTAL", "TAX", "REMARK", "==="]
 
 
 def clean_item_rows(rows):
+    """합계/이하여백 등 요약행을 걸러낸다. 보통 이런 행은 품명(name) 칸에
+    라벨이 오지만, 격자 기반 OCR에서는 셀 경계가 표와 어긋나 그 라벨이 규격
+    (spec) 칸으로 밀려 잡히는 경우가 있어 둘 다 검사한다."""
     cleaned = []
     for row in rows:
-        normalized_name = normalize_header(row["name"])
-        if any(normalize_header(keyword) in normalized_name for keyword in SUMMARY_KEYWORDS):
+        combined = normalize_header(row["name"]) + normalize_header(row.get("spec", ""))
+        if any(normalize_header(keyword) in combined for keyword in SUMMARY_KEYWORDS):
             continue
         cleaned.append(row)
     return cleaned
@@ -509,8 +534,10 @@ def _find_best_table(pdf, synonyms=None):
     return best_table
 
 
-def _render_pages_for_ocr(pdf_bytes, zoom=3.0):
-    """OCR용으로 미리보기(zoom=1.5)보다 더 높은 해상도로 각 페이지를 렌더링한다."""
+def _render_pages_for_ocr(pdf_bytes, dpi=OCR_DPI):
+    """OCR용으로 미리보기(zoom=1.5, 약 108DPI)보다 훨씬 높은 해상도로 각 페이지를
+    렌더링한다. PyMuPDF의 zoom 배율은 72DPI를 1.0 기준으로 하므로 dpi/72로 변환한다."""
+    zoom = dpi / _PDF_BASE_DPI
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         matrix = fitz.Matrix(zoom, zoom)
@@ -521,6 +548,38 @@ def _render_pages_for_ocr(pdf_bytes, zoom=3.0):
         return images
     finally:
         doc.close()
+
+
+def _deskew(binary):
+    """검은 글자(0)/흰 배경(255) 이진화 이미지의 기울기를 추정해 보정한다.
+    (참고: OpenCV 문서 이미지 deskew의 표준 방식 - 전경 픽셀 좌표의
+    최소외접사각형(minAreaRect) 각도를 이용한다.)"""
+    inverted = cv2.bitwise_not(binary)  # 전경(글자/선)을 255로 뒤집어서 좌표를 뽑는다.
+    coords = np.column_stack(np.where(inverted > 0))
+    if coords.shape[0] == 0:
+        return binary
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+    if abs(angle) < 0.1:
+        return binary
+    h, w = binary.shape
+    matrix = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    return cv2.warpAffine(
+        binary, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+    )
+
+
+def _preprocess_for_ocr(pil_image):
+    """OCR 정확도를 높이기 위한 전처리: 그레이스케일 -> Otsu 이진화 -> deskew(기울기
+    보정) -> 노이즈 제거. 입력/출력 모두 PIL Image(그레이스케일)."""
+    gray = np.array(pil_image.convert("L"))
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    deskewed = _deskew(binary)
+    denoised = cv2.fastNlMeansDenoising(deskewed, h=10)
+    return Image.fromarray(denoised)
 
 
 def ocr_page_text(pil_image):
@@ -697,16 +756,202 @@ def _build_table_from_ocr_rows(rows, header_idx, header_fields):
     return table, {"columns": columns, "data_start": 1}
 
 
-def ocr_extract_items(pil_image, synonyms=None):
-    """스캔 페이지 이미지에서 OCR로 품목 표를 재구성해본다. 헤더 라벨을 못 찾거나
-    수량/단가 열이 전혀 없으면 None (표를 못 찾은 것으로 보고 상위에서 다른 방법으로
-    대체하도록 한다)."""
-    _configure_tesseract()
-    try:
-        words = _ocr_words(pil_image)
-    except pytesseract.TesseractNotFoundError as exc:
-        raise OCRUnavailableError(str(exc)) from exc
+# 격자 검출/셀 OCR에서 "숫자만 나와야 하는" 열들. 이 열은 셀을 --psm 7 +
+# 숫자 화이트리스트로 다시 OCR해서 문자 오인식을 줄인다. printed_supply(공급가)는
+# 검산(_flag_arithmetic_mismatches)에만 쓰이고 최종 items에는 그대로 남는다.
+NUMERIC_OCR_FIELDS = {"qty", "weight", "price", "printed_supply", "printed_vat"}
 
+
+def _cluster_positions(projection, min_count=1):
+    """1차원 투영값 배열에서 "선이 있는" 위치들을 찾아, 연속 구간마다 중심 좌표
+    하나씩을 오름차순으로 반환한다 (표 격자선의 두께를 하나의 좌표로 뭉친다).
+
+    min_count는 페이지 전체 최댓값(예: 바깥 테두리처럼 페이지 전체 높이/너비를
+    가로지르는 선) 대비 상대값이 아니라 절대 픽셀 개수 기준이다 - 표 안의
+    행 하나 높이만큼만 있는 짧은 열 구분선은 페이지를 가로지르는 긴 테두리선보다
+    투영값이 훨씬 작아서, 최댓값 비례 기준을 쓰면 죄다 걸러져 버린다. 애초에
+    이 함수에 들어오는 투영값은 이미 모폴로지 열림 연산(erode+dilate)을 거친
+    마스크에서 나온 것이라, 커널 크기보다 짧은 잡음은 그 단계에서 이미 사라졌다."""
+    if projection.size == 0:
+        return []
+    active = projection >= min_count
+    positions = []
+    start = None
+    for i, is_active in enumerate(active):
+        if is_active and start is None:
+            start = i
+        elif not is_active and start is not None:
+            positions.append((start + i - 1) // 2)
+            start = None
+    if start is not None:
+        positions.append((start + len(active) - 1) // 2)
+    return positions
+
+
+def _line_masks(gray_image_array):
+    """이진화(Otsu) 후 모폴로지 열림 연산으로 가로선/세로선만 남긴 마스크 쌍을
+    반환한다 ((horizontal_lines, vertical_lines), 둘 다 선=255)."""
+    _, binary = cv2.threshold(gray_image_array, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    inverted = cv2.bitwise_not(binary)
+    h, w = inverted.shape
+
+    horizontal_size = max(w // 30, 15)
+    vertical_size = max(h // 30, 15)
+
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (horizontal_size, 1))
+    horizontal_lines = cv2.dilate(cv2.erode(inverted, horizontal_kernel), horizontal_kernel)
+
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, vertical_size))
+    vertical_lines = cv2.dilate(cv2.erode(inverted, vertical_kernel), vertical_kernel)
+
+    return horizontal_lines, vertical_lines
+
+
+_CELL_BORDER_INSET = 6
+_CELL_BORDER_NOISE_RE = re.compile(r"^[|_.,:;·•\-~`'\"\[\](){}]+|[|_.,:;·•\-~`'\"\[\](){}]+$")
+
+
+def _ocr_cell(pil_image, bbox, numeric=False):
+    """셀 영역(bbox=(x0,y0,x1,y1))만 잘라서 한 줄(--psm 7) 기준으로 OCR한다.
+    numeric=True면 숫자/콤마/마침표만 인식하도록 화이트리스트를 건다.
+
+    격자선 검출로 얻은 경계는 선의 중심 좌표라, 그대로 자르면 테두리선 픽셀
+    일부가 셀 안쪽에 같이 딸려 들어와 "|"/"[" 같은 잡음 문자로 오인식되기 쉽다.
+    안쪽으로 살짝(_CELL_BORDER_INSET) 줄여서 자르고, 그래도 남는 앞/뒤 테두리
+    잡음 문자는 후처리로 한 번 더 제거한다."""
+    x0, y0, x1, y1 = bbox
+    inset = min(_CELL_BORDER_INSET, (x1 - x0) // 4, (y1 - y0) // 4)
+    cropped = pil_image.crop((x0 + inset, y0 + inset, x1 - inset, y1 - inset))
+    config = "--psm 7"
+    if numeric:
+        config += " -c tessedit_char_whitelist=0123456789,."
+    text = pytesseract.image_to_string(cropped, lang=OCR_LANG, config=config).strip()
+    return _CELL_BORDER_NOISE_RE.sub("", text).strip()
+
+
+def _build_table_from_grid(pil_image, synonyms=None):
+    """표 격자선을 검출해 셀 단위로 정확히 잘라 OCR한 표를 2차원 텍스트 리스트로
+    만든다. 격자(테두리선)를 못 찾거나 헤더를 못 찾으면 None (호출부가 기존
+    좌표-근접 방식으로 폴백한다).
+
+    1) 가로선 위치로 행 구간을 나눈다.
+    2) 각 행 구간마다 "그 구간 안에서만" 열 경계를 찾아 화이트리스트 없이
+       OCR해보고, 품명 등 알려진 헤더 라벨이 가장 많이 매칭되는 구간을 헤더
+       행으로 고른다 - 한 페이지에 표 말고도 다른 박스(제목란/합계란 등)가
+       있을 수 있어, 격자의 첫 행이 항상 헤더라고 가정하지 않는다.
+       (참고: 개별 행 구간은 높이가 얕아서 세로선이 커널 크기보다 짧게 잘려
+       열 검출이 들쭉날쭉할 수 있다 - 이 단계는 "헤더가 어디 있는지"만 찾는
+       용도라 이 정도 오차는 괜찮다.)
+    3) 헤더 행부터, 다음 행 높이가 헤더 행 높이의 3배를 넘는 지점(다른 박스로
+       넘어갔거나 "이하 여백" 같은 빈 공간) 전까지를 표 본문으로 본다. 표의 열
+       구분선은 보통 모든 행에서 폭이 똑같으므로, 열 경계는 헤더 행에서 찾은
+       것을 표 전체(본문 행 포함)에 그대로 재사용한다 - 본문 행마다 따로 다시
+       찾으면(특히 얇은 행에서) 헤더와 미묘하게 다른 열 개수/위치가 나와 헤더의
+       열->필드 매핑이 데이터 행과 어긋나 버릴 수 있다.
+    """
+    horizontal_lines, vertical_lines = _line_masks(np.array(pil_image.convert("L")))
+    row_positions = _cluster_positions(np.sum(horizontal_lines > 0, axis=1).astype(float))
+    if len(row_positions) < 3:
+        return None
+
+    header_idx, best_score, col_positions = None, 0, None
+    for r in range(len(row_positions) - 1):
+        y0, y1 = row_positions[r], row_positions[r + 1]
+        cols = _cluster_positions(np.sum(vertical_lines[y0:y1, :] > 0, axis=0).astype(float))
+        if len(cols) < 2:
+            continue
+        texts = [_ocr_cell(pil_image, (cols[c], y0, cols[c + 1], y1)) for c in range(len(cols) - 1)]
+        fields = [match_field(t, synonyms=synonyms) or match_field_fuzzy(t, synonyms=synonyms) for t in texts]
+        score = sum(1 for f in fields if f)
+        if "name" in fields and score > best_score:
+            header_idx, best_score, col_positions = r, score, cols
+
+    if header_idx is None:
+        return None
+
+    header_height = row_positions[header_idx + 1] - row_positions[header_idx]
+    body_end = header_idx + 1
+    while body_end + 1 < len(row_positions):
+        if row_positions[body_end + 1] - row_positions[body_end] > header_height * 3:
+            break
+        body_end += 1
+
+    table = []
+    for r in range(header_idx, body_end + 1):
+        y0, y1 = row_positions[r], row_positions[r + 1]
+        table.append([
+            _ocr_cell(pil_image, (col_positions[c], y0, col_positions[c + 1], y1))
+            for c in range(len(col_positions) - 1)
+        ])
+
+    field_by_col = {}
+    for col_idx, text in enumerate(table[0]):
+        field = match_field(text, synonyms=synonyms) or match_field_fuzzy(text, synonyms=synonyms)
+        if field:
+            field_by_col[col_idx] = field
+
+    for row_offset in range(1, len(table)):
+        y0, y1 = row_positions[header_idx + row_offset], row_positions[header_idx + row_offset + 1]
+        for col_idx, field in field_by_col.items():
+            if field in NUMERIC_OCR_FIELDS:
+                table[row_offset][col_idx] = _ocr_cell(
+                    pil_image, (col_positions[col_idx], y0, col_positions[col_idx + 1], y1), numeric=True
+                )
+
+    return table
+
+
+def _flag_arithmetic_mismatches(items, tolerance_ratio=0.01, tolerance_abs=1.0):
+    """공급가 = (중량이 있으면 중량, 없으면 수량) x 단가 관계로 검산해서, PDF에
+    인쇄된 공급가(printed_supply)와 어긋나는 행에 _flagged=True를 붙인다 (OCR
+    숫자 오인식 경고용). generator.py는 공급가를 항상 수식으로 재계산하므로
+    이 플래그는 화면 검토용 신호일 뿐 실제 계산에는 영향을 주지 않는다."""
+    result = []
+    for item in items:
+        item = dict(item)
+        printed_supply = item.get("printed_supply")
+        if isinstance(printed_supply, str):
+            printed_supply = parse_number(printed_supply)
+        price = item.get("price")
+        weight = item.get("weight")
+        if isinstance(weight, str):
+            weight = parse_number(weight)
+        multiplier = weight if weight is not None else item.get("qty")
+        if printed_supply is not None and price is not None and multiplier is not None:
+            expected = multiplier * price
+            if abs(expected - printed_supply) > max(tolerance_abs, printed_supply * tolerance_ratio):
+                item["_flagged"] = True
+        result.append(item)
+    return result
+
+
+def _ocr_extract_items_via_grid(pil_image, synonyms=None):
+    """격자선(표 테두리)을 검출해 셀 단위로 정확히 잘라 OCR하는 경로. 격자를
+    못 찾거나 헤더/수량/단가를 못 찾으면 None."""
+    table = _build_table_from_grid(pil_image, synonyms=synonyms)
+    mapping = map_table_columns(table, synonyms=synonyms) if table else None
+    if not mapping or ("qty" not in mapping["columns"] and "price" not in mapping["columns"]):
+        return None
+
+    # _build_table_from_grid()가 만든 표는 항상 0번째 행이 헤더다.
+    # extract_items_from_table()의 "헤더 셀에 다음 데이터가 같이 붙어 있으면
+    # 살려낸다" 로직은 헤더 셀 텍스트가 알려진 라벨과 정확히 일치할 때만
+    # 안전한데, 격자에서 자른 헤더 셀은 테두리선 잔여물 때문에 라벨과 정확히
+    # 일치하지 않을 수 있어(예: 앞뒤 잡음 문자) 그 로직이 헤더 텍스트 전체를
+    # 가짜 품목 행으로 만들어버릴 수 있다. 헤더 행을 비워서 막는다.
+    table[0] = ["" for _ in table[0]]
+
+    raw_rows = extract_items_from_table(table, mapping, synonyms=synonyms)
+    resolved_rows = resolve_duplicate_price_columns(raw_rows)
+    cleaned_rows = clean_item_rows(resolved_rows)
+    items = apply_hierarchical_prefix(cleaned_rows)
+    return items or None
+
+
+def _ocr_extract_items_via_word_anchors(pil_image, synonyms=None):
+    """격자선이 없는(또는 못 찾은) 표를 위한 기존 방식: 헤더 라벨의 x좌표를
+    기준점 삼아 단어를 가장 가까운 기준점에 배정해서 표를 재구성한다."""
+    words = _ocr_words(pil_image)
     rows = _cluster_words_into_rows(words)
     header_idx, header_fields = _find_ocr_header_row(rows, synonyms=synonyms)
     if header_idx is None:
@@ -727,6 +972,28 @@ def ocr_extract_items(pil_image, synonyms=None):
     resolved_rows = resolve_duplicate_price_columns(raw_rows)
     cleaned_rows = clean_item_rows(resolved_rows)
     return apply_hierarchical_prefix(cleaned_rows)
+
+
+def ocr_extract_items(pil_image, synonyms=None):
+    """스캔 페이지 이미지에서 OCR로 품목 표를 재구성해본다. 헤더 라벨을 못 찾거나
+    수량/단가 열이 전혀 없으면 None (표를 못 찾은 것으로 보고 상위에서 다른 방법으로
+    대체하도록 한다).
+
+    먼저 표 격자선을 검출해 셀 단위로 정확히 잘라 OCR하는 방식을 시도하고,
+    격자(테두리선)가 없어서 못 찾거나 그 경로에서 품목을 못 뽑으면 기존의
+    좌표-근접 방식으로 재시도한다.
+    """
+    _configure_tesseract()
+    try:
+        items = _ocr_extract_items_via_grid(pil_image, synonyms=synonyms)
+        if items is None:
+            items = _ocr_extract_items_via_word_anchors(pil_image, synonyms=synonyms)
+    except pytesseract.TesseractNotFoundError as exc:
+        raise OCRUnavailableError(str(exc)) from exc
+
+    if not items:
+        return items
+    return _flag_arithmetic_mismatches(items)
 
 
 def _extract_large_embedded_images(pdf_bytes, min_area_ratio=0.15):
@@ -762,12 +1029,15 @@ def _extract_large_embedded_images(pdf_bytes, min_area_ratio=0.15):
 
 def _parse_scanned_pdf(pdf_bytes, warnings, synonyms=None):
     try:
-        ocr_pages = _render_pages_for_ocr(pdf_bytes)
+        # 렌더링된 페이지/임베드 이미지 모두 OCR 전에 그레이스케일->Otsu 이진화->
+        # deskew->노이즈 제거를 거친다 (문서 인식 정확도를 높이는 표준 전처리).
+        ocr_pages = [_preprocess_for_ocr(img) for img in _render_pages_for_ocr(pdf_bytes)]
         ocr_full_text = "\n".join(ocr_page_text(img) for img in ocr_pages)
         company = extract_company_name(ocr_full_text)
         title = extract_title(ocr_full_text)
 
-        candidate_images = list(ocr_pages) + _extract_large_embedded_images(pdf_bytes)
+        embedded_images = [_preprocess_for_ocr(img) for img in _extract_large_embedded_images(pdf_bytes)]
+        candidate_images = ocr_pages + embedded_images
 
         items = None
         for img in candidate_images:
@@ -776,7 +1046,10 @@ def _parse_scanned_pdf(pdf_bytes, warnings, synonyms=None):
                 break
 
         if items:
-            pass
+            if any(item.get("_flagged") for item in items):
+                warnings.append(
+                    "일부 품목의 금액이 수량(또는 중량)x단가 계산과 맞지 않아 표시했습니다. 꼭 확인해주세요."
+                )
         else:
             fallback_item = extract_paragraph_fallback(ocr_full_text, synonyms=synonyms)
             if fallback_item:

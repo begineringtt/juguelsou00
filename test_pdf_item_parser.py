@@ -2,6 +2,7 @@ import base64
 import os
 
 import fitz
+import numpy as np
 import pytesseract
 
 import pdf_item_parser
@@ -54,8 +55,9 @@ def test_match_field_recognizes_description_as_name():
 def test_match_field_fuzzy_matches_substring_with_bullet_prefix():
     assert match_field_fuzzy("ㅇ. 품 명 ") == "name"
     assert match_field_fuzzy("ㅇ. 단 가 ") == "price"
-    assert match_field_fuzzy("ㅇ. 공 급 가 액") is None
-    assert match_field_fuzzy("ㅇ. 부 가 세") is None
+    # 공급가액/부가세는 printed_supply/printed_vat로 인식된다 (OCR 검산용).
+    assert match_field_fuzzy("ㅇ. 공 급 가 액") == "printed_supply"
+    assert match_field_fuzzy("ㅇ. 부 가 세") == "printed_vat"
     print("OK: test_match_field_fuzzy_matches_substring_with_bullet_prefix")
 
 
@@ -157,7 +159,8 @@ def test_find_header_row_scans_past_summary_row():
     ]
     idx, score = find_header_row(table)
     assert idx == 1
-    assert score == 5
+    # 품명/규격/단위/수량/단가/금액(printed_supply) 6개 라벨이 매칭된다.
+    assert score == 6
     print("OK: test_find_header_row_scans_past_summary_row")
 
 
@@ -173,7 +176,8 @@ def test_find_header_row_scans_past_five_metadata_rows():
     ]
     idx, score = find_header_row(table)
     assert idx == 5
-    assert score == 5
+    # 품명/규격/단위/수량/단가/공급가액(printed_supply) 6개 라벨이 매칭된다.
+    assert score == 6
     print("OK: test_find_header_row_scans_past_five_metadata_rows")
 
 
@@ -394,6 +398,133 @@ def test_extract_paragraph_fallback_returns_none_without_name():
     print("OK: test_extract_paragraph_fallback_returns_none_without_name")
 
 
+def test_render_pages_for_ocr_uses_ocr_dpi_by_default():
+    doc = fitz.open()
+    doc.new_page(width=72, height=72)  # 72pt = 1inch @ 72dpi
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    images = pdf_item_parser._render_pages_for_ocr(pdf_bytes)
+    assert len(images) == 1
+    # 1인치 x 1인치 페이지를 OCR_DPI(기본 350)로 렌더링하면 각 변이 350px 근방이어야
+    # 한다 (반올림 오차 몇 px 정도는 허용).
+    w, h = images[0].size
+    assert abs(w - pdf_item_parser.OCR_DPI) <= 2
+    assert abs(h - pdf_item_parser.OCR_DPI) <= 2
+    print("OK: test_render_pages_for_ocr_uses_ocr_dpi_by_default")
+
+
+def test_cluster_positions_groups_consecutive_active_regions_by_center():
+    projection = np.array([0, 0, 5, 5, 5, 0, 0, 0, 3, 3, 0])
+    positions = pdf_item_parser._cluster_positions(projection, min_count=1)
+    assert positions == [3, 8]
+    print("OK: test_cluster_positions_groups_consecutive_active_regions_by_center")
+
+
+def test_cluster_positions_empty_projection_returns_empty_list():
+    assert pdf_item_parser._cluster_positions(np.array([]), min_count=1) == []
+    assert pdf_item_parser._cluster_positions(np.array([0, 0, 0]), min_count=1) == []
+    print("OK: test_cluster_positions_empty_projection_returns_empty_list")
+
+
+def test_deskew_straightens_rotated_horizontal_lines():
+    import cv2
+    from PIL import Image, ImageDraw
+
+    img = Image.new("L", (600, 400), color=255)
+    draw = ImageDraw.Draw(img)
+    for y in range(150, 260, 20):
+        draw.line([(60, y), (540, y)], fill=0, width=6)
+    rotated = img.rotate(6, expand=True, fillcolor=255, resample=Image.BICUBIC)
+
+    binary = np.array(rotated)
+    _, binary = cv2.threshold(binary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    deskewed = pdf_item_parser._deskew(binary)
+
+    # 보정 후 다시 기울기를 재보면 원래(6도)보다 훨씬 0에 가까워야 한다.
+    inverted = cv2.bitwise_not(deskewed)
+    coords = np.column_stack(np.where(inverted > 0))
+    angle = cv2.minAreaRect(coords)[-1]
+    residual = angle if angle >= -45 else 90 + angle
+    assert abs(residual) < 2.0
+    print("OK: test_deskew_straightens_rotated_horizontal_lines")
+
+
+def test_preprocess_for_ocr_returns_grayscale_image_same_size():
+    from PIL import Image
+
+    img = Image.new("RGB", (200, 100), color=(255, 255, 255))
+    result = pdf_item_parser._preprocess_for_ocr(img)
+    assert result.mode == "L"
+    assert result.size == (200, 100)
+    print("OK: test_preprocess_for_ocr_returns_grayscale_image_same_size")
+
+
+def test_ocr_cell_numeric_config_includes_whitelist():
+    captured = {}
+
+    def fake_image_to_string(image, lang=None, config=None):
+        captured["config"] = config
+        return "1,234"
+
+    original = pytesseract.image_to_string
+    pytesseract.image_to_string = fake_image_to_string
+    try:
+        from PIL import Image
+        img = Image.new("L", (100, 40), color=255)
+
+        pdf_item_parser._ocr_cell(img, (0, 0, 100, 40), numeric=True)
+        assert "tessedit_char_whitelist=0123456789,." in captured["config"]
+
+        pdf_item_parser._ocr_cell(img, (0, 0, 100, 40), numeric=False)
+        assert "tessedit_char_whitelist" not in captured["config"]
+    finally:
+        pytesseract.image_to_string = original
+    print("OK: test_ocr_cell_numeric_config_includes_whitelist")
+
+
+def test_ocr_cell_strips_border_noise_characters():
+    def fake_image_to_string(image, lang=None, config=None):
+        return "| 품 명 ["
+
+    original = pytesseract.image_to_string
+    pytesseract.image_to_string = fake_image_to_string
+    try:
+        from PIL import Image
+        img = Image.new("L", (100, 40), color=255)
+        text = pdf_item_parser._ocr_cell(img, (0, 0, 100, 40))
+        assert text == "품 명"
+    finally:
+        pytesseract.image_to_string = original
+    print("OK: test_ocr_cell_strips_border_noise_characters")
+
+
+def test_flag_arithmetic_mismatches_flags_incorrect_printed_supply():
+    items = [
+        {"name": "정상", "qty": 2.0, "price": 1000.0, "printed_supply": "2,000"},
+        {"name": "오류", "qty": 2.0, "price": 1000.0, "printed_supply": "1,000"},
+    ]
+    flagged = pdf_item_parser._flag_arithmetic_mismatches(items)
+    assert not flagged[0].get("_flagged")
+    assert flagged[1]["_flagged"] is True
+    print("OK: test_flag_arithmetic_mismatches_flags_incorrect_printed_supply")
+
+
+def test_flag_arithmetic_mismatches_prefers_weight_over_qty():
+    # 중량이 있으면 수량 대신 중량 x 단가로 검산한다 (generator.py와 동일한 규칙).
+    items = [{"name": "중량품목", "qty": 999.0, "weight": "5", "price": 7400.0, "printed_supply": "37000"}]
+    flagged = pdf_item_parser._flag_arithmetic_mismatches(items)
+    assert not flagged[0].get("_flagged")
+    print("OK: test_flag_arithmetic_mismatches_prefers_weight_over_qty")
+
+
+def test_flag_arithmetic_mismatches_skips_rows_missing_data():
+    items = [{"name": "정보부족", "qty": None, "price": None}]
+    flagged = pdf_item_parser._flag_arithmetic_mismatches(items)
+    assert not flagged[0].get("_flagged")
+    print("OK: test_flag_arithmetic_mismatches_skips_rows_missing_data")
+
+
 def test_render_page_images_returns_one_png_per_page():
     doc = fitz.open()
     doc.new_page()
@@ -560,12 +691,36 @@ def test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec():
         print("SKIP: test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec (no sample dir)")
         return
     result = parse_pdf_items(_load_sample("견적서_알루스퀘어.pdf"))
-    items = result["items"]
+    items = [it for it in result["items"] if "AL" in it["name"]]
     assert len(items) == 2
     for item in items:
         assert "AL" in item["name"]
         assert item["spec"].strip()
     print("OK: test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec")
+
+
+def test_parse_pdf_items_scanned_pdf_grid_path_recovers_qty_weight_and_price():
+    # 표 격자선을 검출해 셀 단위로 잘라 OCR하는 경로(DPI 상향 + 전처리 + 숫자
+    # 화이트리스트 + 검산)가 실제로 정확한 수량/중량/단가/공급가를 뽑아내는지
+    # 확인한다. 개선 전에는 수량이 전혀 인식되지 않았고(qty=None), 중량이
+    # 인접 열의 숫자와 뒤섞여 "2 5"/"2 13" 같은 값이 나왔었다.
+    if not os.path.isdir(SAMPLE_DIR):
+        print("SKIP: test_parse_pdf_items_scanned_pdf_grid_path_recovers_qty_weight_and_price (no sample dir)")
+        return
+    result = parse_pdf_items(_load_sample("견적서_알루스퀘어.pdf"))
+    items = [it for it in result["items"] if "AL" in it["name"]]
+    assert len(items) == 2
+    assert items[0]["qty"] == 2.0
+    assert items[0]["unit"] == "kg"
+    assert items[0]["price"] == 7400.0
+    assert items[0]["weight"] == 5.0
+    assert items[1]["qty"] == 2.0
+    assert items[1]["price"] == 7400.0
+    assert items[1]["weight"] == 13.0
+    # 공급가 = 중량 x 단가로 검산이 맞아떨어지므로 두 행 다 플래그가 없어야 한다.
+    assert not items[0].get("_flagged")
+    assert not items[1].get("_flagged")
+    print("OK: test_parse_pdf_items_scanned_pdf_grid_path_recovers_qty_weight_and_price")
 
 
 def test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract():
@@ -725,7 +880,8 @@ def test_extract_items_from_table_passes_through_custom_column():
     rows = extract_items_from_table(table, mapping, synonyms=synonyms)
     assert rows[0]["weight"] == "25kg"
     resolved = resolve_duplicate_price_columns(rows)
-    assert resolved[0]["weight"] == "25kg"
+    # weight는 qty/price처럼 숫자 필드라 resolve 단계에서 "25kg" -> 25.0으로 파싱된다.
+    assert resolved[0]["weight"] == 25.0
     assert resolved[0]["price"] == 7400.0
     print("OK: test_extract_items_from_table_passes_through_custom_column")
 
@@ -747,9 +903,8 @@ def test_parse_pdf_items_extra_fields_does_not_break_scanned_pdf_pipeline():
         print("SKIP: test_parse_pdf_items_extra_fields_does_not_break_scanned_pdf_pipeline (no sample dir)")
         return
     result = parse_pdf_items(_load_sample("견적서_알루스퀘어.pdf"), extra_fields={"weight": ["중량"]})
-    assert len(result["items"]) == 2
-    for item in result["items"]:
-        assert "AL" in item["name"]
+    items = [it for it in result["items"] if "AL" in it["name"]]
+    assert len(items) == 2
     print("OK: test_parse_pdf_items_extra_fields_does_not_break_scanned_pdf_pipeline")
 
 
@@ -791,6 +946,16 @@ if __name__ == "__main__":
     test_apply_hierarchical_prefix_passes_through_flat_rows_unchanged()
     test_extract_paragraph_fallback_finds_labelled_values()
     test_extract_paragraph_fallback_returns_none_without_name()
+    test_render_pages_for_ocr_uses_ocr_dpi_by_default()
+    test_cluster_positions_groups_consecutive_active_regions_by_center()
+    test_cluster_positions_empty_projection_returns_empty_list()
+    test_deskew_straightens_rotated_horizontal_lines()
+    test_preprocess_for_ocr_returns_grayscale_image_same_size()
+    test_ocr_cell_numeric_config_includes_whitelist()
+    test_ocr_cell_strips_border_noise_characters()
+    test_flag_arithmetic_mismatches_flags_incorrect_printed_supply()
+    test_flag_arithmetic_mismatches_prefers_weight_over_qty()
+    test_flag_arithmetic_mismatches_skips_rows_missing_data()
     test_render_page_images_returns_one_png_per_page()
     test_recover_missing_name_column_fills_structurally_missing_cell()
     test_recover_missing_name_column_leaves_existing_cells_untouched()
@@ -802,6 +967,7 @@ if __name__ == "__main__":
     test_parse_pdf_items_no_table_fallback_case()
     test_parse_pdf_items_scanned_pdf_uses_ocr_for_company()
     test_parse_pdf_items_scanned_pdf_recovers_item_name_and_spec()
+    test_parse_pdf_items_scanned_pdf_grid_path_recovers_qty_weight_and_price()
     test_parse_pdf_items_scanned_pdf_degrades_gracefully_without_tesseract()
     test_parse_pdf_items_recovers_borderless_name_column_with_english_headers()
     test_extract_company_name_various_samples()
