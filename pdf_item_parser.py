@@ -902,9 +902,9 @@ def _build_table_from_grid(pil_image, synonyms=None):
 
 
 def _flag_arithmetic_mismatches(items, tolerance_ratio=0.01, tolerance_abs=1.0):
-    """공급가 = (중량이 있으면 중량, 없으면 수량) x 단가 관계로 검산해서, PDF에
-    인쇄된 공급가(printed_supply)와 어긋나는 행에 _flagged=True를 붙인다 (OCR
-    숫자 오인식 경고용). generator.py는 공급가를 항상 수식으로 재계산하므로
+    """공급가 = (중량이 있고 0이 아니면 중량, 아니면 수량) x 단가 관계로 검산해서,
+    PDF에 인쇄된 공급가(printed_supply)와 어긋나는 행에 _flagged=True를 붙인다
+    (OCR 숫자 오인식 경고용). generator.py는 공급가를 항상 수식으로 재계산하므로
     이 플래그는 화면 검토용 신호일 뿐 실제 계산에는 영향을 주지 않는다."""
     result = []
     for item in items:
@@ -916,7 +916,7 @@ def _flag_arithmetic_mismatches(items, tolerance_ratio=0.01, tolerance_abs=1.0):
         weight = item.get("weight")
         if isinstance(weight, str):
             weight = parse_number(weight)
-        multiplier = weight if weight is not None else item.get("qty")
+        multiplier = weight if weight else item.get("qty")
         if printed_supply is not None and price is not None and multiplier is not None:
             expected = multiplier * price
             if abs(expected - printed_supply) > max(tolerance_abs, printed_supply * tolerance_ratio):

@@ -1,3 +1,6 @@
+import os
+import shutil
+
 import openpyxl
 from openpyxl.utils import get_column_letter
 
@@ -169,6 +172,26 @@ def test_weight_replaces_qty_in_supply_formula():
     print("OK: test_weight_replaces_qty_in_supply_formula")
 
 
+def test_zero_weight_falls_back_to_qty_in_supply_formula():
+    # 중량이 0이면(미인식/미입력) 중량 대신 수량으로 공급가를 계산해야 한다 -
+    # 그렇지 않으면 공급가가 항상 0이 되어버린다.
+    data = dict(BASE_DATA)
+    data["items"] = [{"name": "품목1", "unit": "EA", "qty": 2, "weight": 0, "price": 1000}]
+    buf = build_expense_report(data)
+    wb = openpyxl.load_workbook(buf)
+    ws = wb.worksheets[0]
+
+    columns = column_settings.DEFAULT_COLUMNS
+    active = _infer_active_keys(data["items"], {c["key"] for c in columns})
+    layout = _compute_column_layout(columns, active)
+    qty_letter = get_column_letter(layout["qty"][0])
+    price_letter = get_column_letter(layout["price"][0])
+    supply_letter = get_column_letter(layout["supply"][0])
+
+    assert ws[f"{supply_letter}{FIRST_ITEM_ROW}"].value == f"={qty_letter}{FIRST_ITEM_ROW}*{price_letter}{FIRST_ITEM_ROW}"
+    print("OK: test_zero_weight_falls_back_to_qty_in_supply_formula")
+
+
 def test_name_and_spec_cells_use_shrink_to_fit():
     data = dict(BASE_DATA)
     data["items"] = [{"name": "품목1", "spec": "규격1", "unit": "EA", "qty": 2, "price": 1000}]
@@ -326,16 +349,34 @@ def test_many_items_keeps_accounting_number_format_for_overflow_rows():
 
 
 if __name__ == "__main__":
-    test_all_columns_regression()
-    test_spec_dropped_compacts_header()
-    test_total_row_boundary_matches_supply_start()
-    test_supply_direct_entry_when_price_off()
-    test_qty_price_supply_cells_populated()
-    test_weight_replaces_qty_in_supply_formula()
-    test_name_and_spec_cells_use_shrink_to_fit()
-    test_base_item_count_leaves_spacer_row_before_footer()
-    test_small_item_count_keeps_footer_at_original_template_position()
-    test_many_items_inserts_rows_and_pushes_footer_block_down()
-    test_many_items_keeps_outer_frame_border_consistent()
-    test_many_items_keeps_accounting_number_format_for_overflow_rows()
+    # 이 파일의 테스트는 build_expense_report()를 통해 column_settings.load_columns()
+    # (실제 설치본의 data/column_settings.json)를 그대로 읽는다. 사용자가 화면에서
+    # 열 순서를 드래그해 바꿔놨을 수 있어, 그 실제 설정과 무관하게 항상 기본
+    # 순서(DEFAULT_COLUMNS)로 검증하도록 임시 디렉터리로 격리한다.
+    _original_data_dir = column_settings.DATA_DIR
+    _original_path = column_settings.COLUMN_SETTINGS_PATH
+    _temp_dir = os.path.join(os.path.dirname(__file__), "_test_data_item_table_layout")
+    if os.path.isdir(_temp_dir):
+        shutil.rmtree(_temp_dir)
+    column_settings.DATA_DIR = _temp_dir
+    column_settings.COLUMN_SETTINGS_PATH = os.path.join(_temp_dir, "column_settings.json")
+    try:
+        test_all_columns_regression()
+        test_spec_dropped_compacts_header()
+        test_total_row_boundary_matches_supply_start()
+        test_supply_direct_entry_when_price_off()
+        test_qty_price_supply_cells_populated()
+        test_weight_replaces_qty_in_supply_formula()
+        test_zero_weight_falls_back_to_qty_in_supply_formula()
+        test_name_and_spec_cells_use_shrink_to_fit()
+        test_base_item_count_leaves_spacer_row_before_footer()
+        test_small_item_count_keeps_footer_at_original_template_position()
+        test_many_items_inserts_rows_and_pushes_footer_block_down()
+        test_many_items_keeps_outer_frame_border_consistent()
+        test_many_items_keeps_accounting_number_format_for_overflow_rows()
+    finally:
+        column_settings.DATA_DIR = _original_data_dir
+        column_settings.COLUMN_SETTINGS_PATH = _original_path
+        if os.path.isdir(_temp_dir):
+            shutil.rmtree(_temp_dir)
     print("ALL PASSED")

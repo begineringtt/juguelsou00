@@ -741,10 +741,14 @@ function recalc() {
     let supply;
     if (usePrice) {
       const price = parseFloat(tr.querySelector('.f-price')?.value) || 0;
-      // 중량이 있으면 수량 대신 중량을 단가와 곱한다 (generator.py와 동일한 규칙).
+      // 중량이 있고 0이 아니면 수량 대신 중량을 단가와 곱한다 (generator.py와 동일한
+      // 규칙). 중량이 0이면(미인식/미입력) 수량으로 계산한다.
+      const weightValue = (useWeight && tr.querySelector('.f-weight'))
+        ? parseFloat(tr.querySelector('.f-weight').value) || 0
+        : 0;
       let multiplier = 1;
-      if (useWeight && tr.querySelector('.f-weight')) {
-        multiplier = parseFloat(tr.querySelector('.f-weight').value) || 0;
+      if (weightValue) {
+        multiplier = weightValue;
       } else if (useQty && tr.querySelector('.f-qty')) {
         multiplier = parseFloat(tr.querySelector('.f-qty').value) || 0;
       }

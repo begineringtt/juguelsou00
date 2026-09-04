@@ -518,6 +518,15 @@ def test_flag_arithmetic_mismatches_prefers_weight_over_qty():
     print("OK: test_flag_arithmetic_mismatches_prefers_weight_over_qty")
 
 
+def test_flag_arithmetic_mismatches_zero_weight_falls_back_to_qty():
+    # 중량이 0이면(미인식/미입력) 중량 대신 수량 x 단가로 검산해야 한다 -
+    # 그렇지 않으면 기대값이 항상 0이 되어 정상 행까지 전부 플래그돼 버린다.
+    items = [{"name": "품목", "qty": 5.0, "weight": 0, "price": 7400.0, "printed_supply": "37000"}]
+    flagged = pdf_item_parser._flag_arithmetic_mismatches(items)
+    assert not flagged[0].get("_flagged")
+    print("OK: test_flag_arithmetic_mismatches_zero_weight_falls_back_to_qty")
+
+
 def test_flag_arithmetic_mismatches_skips_rows_missing_data():
     items = [{"name": "정보부족", "qty": None, "price": None}]
     flagged = pdf_item_parser._flag_arithmetic_mismatches(items)
@@ -955,6 +964,7 @@ if __name__ == "__main__":
     test_ocr_cell_strips_border_noise_characters()
     test_flag_arithmetic_mismatches_flags_incorrect_printed_supply()
     test_flag_arithmetic_mismatches_prefers_weight_over_qty()
+    test_flag_arithmetic_mismatches_zero_weight_falls_back_to_qty()
     test_flag_arithmetic_mismatches_skips_rows_missing_data()
     test_render_page_images_returns_one_png_per_page()
     test_recover_missing_name_column_fills_structurally_missing_cell()

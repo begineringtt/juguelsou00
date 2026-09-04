@@ -227,9 +227,10 @@ def _write_item_row(ws, row, layout, item, configured_columns):
         price_cell = ws[f"{price_letter}{row}"]
         price_cell.value = item["price"]
         price_cell.number_format = ACCOUNTING_NUMBER_FORMAT
-        # 중량이 있으면 수량 대신 중량을 단가와 곱한다(중량 기준으로 판매하는
-        # 품목은 "수량"이 참고용으로만 함께 표시되고 계산에는 안 쓰인다).
-        if use_weight:
+        # 중량이 있고 0이 아니면 수량 대신 중량을 단가와 곱한다(중량 기준으로
+        # 판매하는 품목은 "수량"이 참고용으로만 함께 표시되고 계산에는 안 쓰인다).
+        # 중량이 0이면(미인식/미입력) 수량으로 계산한다.
+        if use_weight and item["weight"] != 0:
             multiplier_letter = _col_letter(layout, "weight")
         elif use_qty:
             multiplier_letter = _col_letter(layout, "qty")
