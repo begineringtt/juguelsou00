@@ -49,9 +49,9 @@ def test_all_columns_regression():
     ws = wb.worksheets[0]
 
     assert _header_labels(ws) == {
-        "B": "품목", "I": "규격", "O": "단위", "P": "수량", "Q": "단가", "U": "공급가", "Y": "부가세",
+        "B": "품목", "I": "규격", "M": "단위", "O": "수량", "Q": "단가", "U": "공급가", "Y": "부가세",
     }
-    assert _header_merges(ws) == sorted([(2, 8), (9, 14), (17, 20), (21, 24), (25, 28)])
+    assert _header_merges(ws) == sorted([(2, 8), (9, 12), (13, 14), (15, 16), (17, 20), (21, 24), (25, 28)])
     print("OK: test_all_columns_regression")
 
 
@@ -145,6 +145,48 @@ def test_qty_price_supply_cells_populated():
     assert ws[f"{price_letter}{FIRST_ITEM_ROW}"].value == 1000
     assert ws[f"{supply_letter}{FIRST_ITEM_ROW}"].value == f"={qty_letter}{FIRST_ITEM_ROW}*{price_letter}{FIRST_ITEM_ROW}"
     print("OK: test_qty_price_supply_cells_populated")
+
+
+def test_weight_replaces_qty_in_supply_formula():
+    data = dict(BASE_DATA)
+    data["items"] = [{"name": "품목1", "unit": "EA", "qty": 2, "weight": 12.5, "price": 1000}]
+    buf = build_expense_report(data)
+    wb = openpyxl.load_workbook(buf)
+    ws = wb.worksheets[0]
+
+    columns = column_settings.DEFAULT_COLUMNS
+    active = _infer_active_keys(data["items"], {c["key"] for c in columns})
+    layout = _compute_column_layout(columns, active)
+    qty_letter = get_column_letter(layout["qty"][0])
+    weight_letter = get_column_letter(layout["weight"][0])
+    price_letter = get_column_letter(layout["price"][0])
+    supply_letter = get_column_letter(layout["supply"][0])
+
+    # 수량은 참고용으로 그대로 표시되지만, 공급가 계산은 중량 x 단가를 쓴다.
+    assert ws[f"{qty_letter}{FIRST_ITEM_ROW}"].value == 2
+    assert ws[f"{weight_letter}{FIRST_ITEM_ROW}"].value == 12.5
+    assert ws[f"{supply_letter}{FIRST_ITEM_ROW}"].value == f"={weight_letter}{FIRST_ITEM_ROW}*{price_letter}{FIRST_ITEM_ROW}"
+    print("OK: test_weight_replaces_qty_in_supply_formula")
+
+
+def test_name_and_spec_cells_use_shrink_to_fit():
+    data = dict(BASE_DATA)
+    data["items"] = [{"name": "품목1", "spec": "규격1", "unit": "EA", "qty": 2, "price": 1000}]
+    buf = build_expense_report(data)
+    wb = openpyxl.load_workbook(buf)
+    ws = wb.worksheets[0]
+
+    columns = column_settings.DEFAULT_COLUMNS
+    active = _infer_active_keys(data["items"], {c["key"] for c in columns})
+    layout = _compute_column_layout(columns, active)
+    name_letter = get_column_letter(layout["name"][0])
+    spec_letter = get_column_letter(layout["spec"][0])
+    unit_letter = get_column_letter(layout["unit"][0])
+
+    assert ws[f"{name_letter}{FIRST_ITEM_ROW}"].alignment.shrink_to_fit is True
+    assert ws[f"{spec_letter}{FIRST_ITEM_ROW}"].alignment.shrink_to_fit is True
+    assert not ws[f"{unit_letter}{FIRST_ITEM_ROW}"].alignment.shrink_to_fit
+    print("OK: test_name_and_spec_cells_use_shrink_to_fit")
 
 
 def test_base_item_count_leaves_spacer_row_before_footer():
@@ -289,6 +331,8 @@ if __name__ == "__main__":
     test_total_row_boundary_matches_supply_start()
     test_supply_direct_entry_when_price_off()
     test_qty_price_supply_cells_populated()
+    test_weight_replaces_qty_in_supply_formula()
+    test_name_and_spec_cells_use_shrink_to_fit()
     test_base_item_count_leaves_spacer_row_before_footer()
     test_small_item_count_keeps_footer_at_original_template_position()
     test_many_items_inserts_rows_and_pushes_footer_block_down()

@@ -164,10 +164,8 @@ def generate():
             item = {"name": name.strip()}
             for key, values in active_values.items():
                 raw = values[idx] if idx < len(values) else ""
-                if key == "qty":
-                    item["qty"] = float(raw) if raw.strip() else 0
-                elif key == "price":
-                    item["price"] = float(raw) if raw.strip() else 0
+                if key in ("qty", "weight", "price"):
+                    item[key] = float(raw) if raw.strip() else 0
                 else:
                     item[key] = raw.strip()
             if "price" not in item:

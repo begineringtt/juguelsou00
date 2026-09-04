@@ -676,6 +676,35 @@ def test_extract_title_does_not_duplicate_existing_case_suffix():
     print("OK: test_extract_title_does_not_duplicate_existing_case_suffix")
 
 
+def test_detect_field_order_follows_left_to_right_column_index():
+    table = [
+        ["품명", "수량", "중량", "단가", "규격"],
+        ["AL바", "5", "25kg", "7400", "100x5"],
+    ]
+    mapping = map_table_columns(table)
+    assert pdf_item_parser._detect_field_order(mapping) == ["qty", "weight", "price", "spec"]
+    print("OK: test_detect_field_order_follows_left_to_right_column_index")
+
+
+def test_detect_field_order_returns_none_without_mapping():
+    assert pdf_item_parser._detect_field_order(None) is None
+    print("OK: test_detect_field_order_returns_none_without_mapping")
+
+
+def test_weight_is_recognized_natively_without_extra_synonyms():
+    """중량은 이제 spec/unit/qty/price와 같은 내장 필드라, synonyms를 따로 안 넘겨도
+    HEADER_SYNONYMS만으로 인식되어야 한다."""
+    table = [
+        ["품명", "규격", "수량", "중량", "단가"],
+        ["AL바", "100x5", "5", "25kg", "7400"],
+    ]
+    result = map_table_columns(table)
+    assert result["columns"]["weight"] == [3]
+    rows = extract_items_from_table(table, result)
+    assert rows[0]["weight"] == "25kg"
+    print("OK: test_weight_is_recognized_natively_without_extra_synonyms")
+
+
 def test_map_table_columns_recognizes_custom_synonym():
     table = [
         ["품명", "규격", "수량", "중량", "단가"],
@@ -781,6 +810,9 @@ if __name__ == "__main__":
     test_extract_title_handles_korean_hanja_and_english_labels()
     test_extract_title_truncates_at_trailing_contact_info()
     test_extract_title_does_not_duplicate_existing_case_suffix()
+    test_detect_field_order_follows_left_to_right_column_index()
+    test_detect_field_order_returns_none_without_mapping()
+    test_weight_is_recognized_natively_without_extra_synonyms()
     test_map_table_columns_recognizes_custom_synonym()
     test_extract_items_from_table_passes_through_custom_column()
     test_parse_pdf_items_without_extra_fields_is_unaffected()

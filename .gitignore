@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 data/history.json
 data/projects.json
+data/column_settings.json
 build/
 dist/
 output/

@@ -84,7 +84,12 @@
     font-size: 13px;
     color: #344054;
   }
-  .col-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 13px; }
+  .col-toggles label {
+    display: flex; align-items: center; gap: 5px; margin: 0; font-size: 13px;
+    cursor: grab; padding: 3px 8px; border: 1px solid transparent; border-radius: 6px;
+  }
+  .col-toggles label:hover { background: #f0f2f5; }
+  .col-toggles label.drag-target { border-color: var(--accent); background: #f0f7f3; }
   .col-toggles .hint { color: #98a2b3; font-size: 11.5px; }
   table#itemsTable {
     width: 100%;
@@ -292,23 +297,15 @@
 
     <fieldset id="itemsFieldset">
       <legend>품목</legend>
-      <div class="col-toggles">
-        <label><input type="checkbox" id="colSpec" name="use_spec" checked> 규격</label>
-        <label><input type="checkbox" id="colUnit" name="use_unit" checked> 단위</label>
-        <label><input type="checkbox" id="colQty" name="use_qty" checked> 수량</label>
-        <label><input type="checkbox" id="colPrice" name="use_price" checked> 단가 <span class="hint">(해제하면 공급가를 직접 입력합니다)</span></label>
+      <p class="hint" style="margin:0 0 8px;">항목을 드래그하면 순서를 바꿀 수 있습니다.</p>
+      <div class="col-toggles" id="colToggles"></div>
+      <div class="row-with-select" style="margin-bottom:12px;">
+        <input type="text" id="newColumnLabel" placeholder="새 항목 이름 (예: 중량)">
+        <button type="button" class="small" id="addColumnBtn">+ 항목 추가</button>
       </div>
       <table id="itemsTable">
         <thead>
-          <tr>
-            <th style="width:22%">품목</th>
-            <th data-col="spec" style="width:20%">규격</th>
-            <th data-col="unit" style="width:9%">단위</th>
-            <th data-col="qty" style="width:10%">수량</th>
-            <th data-col="price" style="width:14%">단가</th>
-            <th style="width:14%">공급가</th>
-            <th style="width:5%"></th>
-          </tr>
+          <tr id="itemsHeaderRow"></tr>
         </thead>
         <tbody id="itemsBody"></tbody>
       </table>
@@ -347,14 +344,7 @@
         <div style="flex:1;overflow:auto;max-height:60vh;">
           <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <thead>
-              <tr>
-                <th style="border:1px solid var(--border);padding:6px;">품목</th>
-                <th style="border:1px solid var(--border);padding:6px;">규격</th>
-                <th style="border:1px solid var(--border);padding:6px;">단위</th>
-                <th style="border:1px solid var(--border);padding:6px;">수량</th>
-                <th style="border:1px solid var(--border);padding:6px;">단가</th>
-                <th style="border:1px solid var(--border);padding:6px;"></th>
-              </tr>
+              <tr id="pdfDraftHeaderRow"></tr>
             </thead>
             <tbody id="pdfDraftBody"></tbody>
           </table>
@@ -376,10 +366,143 @@
 <script>
 const PROJECTS = {{ projects | tojson }};
 const itemsBody = document.getElementById('itemsBody');
-const colSpec = document.getElementById('colSpec');
-const colUnit = document.getElementById('colUnit');
-const colQty = document.getElementById('colQty');
-const colPrice = document.getElementById('colPrice');
+
+// 규격/단위/수량/중량/단가 등 품목 표의 "가운데" 열 구성 (품목/공급가/부가세는
+// 항상 고정이라 포함하지 않는다). 드래그로 순서를 바꾸면 이 배열도 같이 바뀌고,
+// 서버(column_settings)에도 저장해서 다음에 열어도 그 순서가 유지된다.
+let COLUMNS = {{ columns | tojson }};
+
+const INPUT_TYPE = { qty: 'number', weight: 'number', price: 'number' };
+const NUMERIC_KEYS = new Set(['qty', 'weight', 'price']);
+
+function isColumnEnabled(key) {
+  const cb = document.querySelector(`#colToggles input[data-key="${key}"]`);
+  return cb ? cb.checked : false;
+}
+
+function renderColumnToggles() {
+  const container = document.getElementById('colToggles');
+  container.innerHTML = '';
+  COLUMNS.forEach(col => {
+    const label = document.createElement('label');
+    label.draggable = true;
+    label.dataset.key = col.key;
+    label.innerHTML = `<input type="checkbox" data-key="${col.key}" name="use_${col.key}" ${col.enabled ? 'checked' : ''}> ${escapeHtml(col.label)}` +
+      (col.key === 'price' ? ' <span class="hint">(해제하면 공급가를 직접 입력합니다)</span>' : '') +
+      (!col.builtin ? ' <button type="button" class="small removeColumnBtn" style="padding:1px 6px;">✕</button>' : '');
+    container.appendChild(label);
+
+    label.querySelector('input[type=checkbox]').addEventListener('change', (e) => {
+      col.enabled = e.target.checked;
+      fetch('/column_settings/enable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `key=${encodeURIComponent(col.key)}&enabled=${col.enabled ? '1' : '0'}`,
+      });
+      applyColumnVisibility();
+    });
+    const removeBtn = label.querySelector('.removeColumnBtn');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await fetch('/column_settings/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `key=${encodeURIComponent(col.key)}`,
+        });
+        COLUMNS = COLUMNS.filter(c => c.key !== col.key);
+        rerenderColumns();
+      });
+    }
+    attachColumnDragHandlers(label, col.key);
+  });
+}
+
+function attachColumnDragHandlers(label, key) {
+  label.addEventListener('dragstart', (e) => {
+    e.stopPropagation();
+    e.dataTransfer.setData('text/x-column-key', key);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  label.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('text/x-column-key')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    label.classList.add('drag-target');
+  });
+  label.addEventListener('dragleave', (e) => {
+    e.stopPropagation();
+    label.classList.remove('drag-target');
+  });
+  label.addEventListener('drop', (e) => {
+    if (!e.dataTransfer.types.includes('text/x-column-key')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    label.classList.remove('drag-target');
+    const draggedKey = e.dataTransfer.getData('text/x-column-key');
+    reorderColumns(draggedKey, key);
+  });
+}
+
+function reorderColumns(draggedKey, targetKey) {
+  if (draggedKey === targetKey) return;
+  const fromIdx = COLUMNS.findIndex(c => c.key === draggedKey);
+  const toIdx = COLUMNS.findIndex(c => c.key === targetKey);
+  if (fromIdx === -1 || toIdx === -1) return;
+  const [moved] = COLUMNS.splice(fromIdx, 1);
+  COLUMNS.splice(toIdx, 0, moved);
+  rerenderColumns();
+  saveColumnOrder();
+}
+
+function saveColumnOrder() {
+  fetch('/column_settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ columns: COLUMNS }),
+  });
+}
+
+function renderItemsHeaderRow() {
+  const row = document.getElementById('itemsHeaderRow');
+  row.innerHTML = '<th style="width:20%">품목</th>';
+  COLUMNS.forEach(col => {
+    const th = document.createElement('th');
+    th.dataset.col = col.key;
+    th.textContent = col.label;
+    row.appendChild(th);
+  });
+  row.innerHTML += '<th style="width:14%">공급가</th><th style="width:5%"></th>';
+}
+
+function rerenderColumns() {
+  // 현재 입력된 값들을 보존한 채로 체크박스/표 헤더/표 본문을 새 COLUMNS 순서로 다시 그린다.
+  const existingRows = [...itemsBody.querySelectorAll('tr')].map(collectRowValues);
+  renderColumnToggles();
+  renderItemsHeaderRow();
+  itemsBody.innerHTML = '';
+  existingRows.forEach(values => addRow(values));
+  applyColumnVisibility();
+}
+
+document.getElementById('addColumnBtn').addEventListener('click', async () => {
+  const input = document.getElementById('newColumnLabel');
+  const label = input.value.trim();
+  if (!label) return;
+  const res = await fetch('/column_settings/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `label=${encodeURIComponent(label)}`,
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || '추가에 실패했습니다.');
+    return;
+  }
+  COLUMNS = data.columns;
+  input.value = '';
+  rerenderColumns();
+});
 
 function todayStr() {
   const d = new Date();
@@ -558,26 +681,45 @@ document.getElementById('saveNewProjectBtn').addEventListener('click', async () 
 function addRow(prefill) {
   prefill = prefill || {};
   const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td><input type="text" class="f-name" value="${prefill.name||''}"></td>
-    <td data-col="spec"><input type="text" class="f-spec" value="${prefill.spec||''}"></td>
-    <td data-col="unit"><input type="text" class="f-unit" value="${prefill.unit||'EA'}"></td>
-    <td data-col="qty"><input type="number" class="f-qty" value="${prefill.qty||1}" min="0" step="any"></td>
-    <td data-col="price"><input type="number" class="f-price" value="${prefill.price||0}" min="0" step="any"></td>
+  let html = `<td><input type="text" class="f-name" value="${escapeHtml(prefill.name||'')}"></td>`;
+  COLUMNS.forEach(col => {
+    const type = INPUT_TYPE[col.key] || 'text';
+    const fallback = col.key === 'unit' ? 'EA' : (col.key === 'qty' ? 1 : '');
+    const raw = prefill[col.key];
+    const value = (raw === undefined || raw === null || raw === '') ? fallback : raw;
+    const numAttrs = type === 'number' ? ' min="0" step="any"' : '';
+    html += `<td data-col="${col.key}"><input type="${type}" class="f-${col.key}" value="${escapeHtml(String(value))}"${numAttrs}></td>`;
+  });
+  html += `
     <td>
       <span class="f-supply-calc">0</span>
-      <input type="number" class="f-supply-input" value="0" min="0" step="any" style="display:none">
+      <input type="number" class="f-supply-input" value="${prefill.supply || 0}" min="0" step="any" style="display:none">
     </td>
     <td><button type="button" class="small removeRowBtn">삭제</button></td>
   `;
+  tr.innerHTML = html;
   itemsBody.appendChild(tr);
-  tr.querySelectorAll('.f-qty, .f-price, .f-supply-input').forEach(el => el.addEventListener('input', recalc));
+  NUMERIC_KEYS.forEach(key => {
+    const el = tr.querySelector(`.f-${key}`);
+    if (el) el.addEventListener('input', recalc);
+  });
+  tr.querySelector('.f-supply-input').addEventListener('input', recalc);
   tr.querySelector('.removeRowBtn').addEventListener('click', () => { tr.remove(); recalc(); });
   applyColumnVisibility();
 }
 
+function collectRowValues(tr) {
+  const values = { name: tr.querySelector('.f-name').value, supply: tr.querySelector('.f-supply-input').value };
+  COLUMNS.forEach(col => {
+    const el = tr.querySelector(`.f-${col.key}`);
+    if (el) values[col.key] = el.value;
+  });
+  return values;
+}
+
 function applyColumnVisibility() {
-  const show = { spec: colSpec.checked, unit: colUnit.checked, qty: colQty.checked, price: colPrice.checked };
+  const show = {};
+  COLUMNS.forEach(col => { show[col.key] = isColumnEnabled(col.key); });
   document.querySelectorAll('[data-col]').forEach(el => {
     el.style.display = show[el.dataset.col] ? '' : 'none';
   });
@@ -589,18 +731,24 @@ function applyColumnVisibility() {
   });
   recalc();
 }
-[colSpec, colUnit, colQty, colPrice].forEach(cb => cb.addEventListener('change', applyColumnVisibility));
 
 function recalc() {
   let sumSupply = 0, sumVat = 0;
-  const usePrice = colPrice.checked;
-  const useQty = colQty.checked;
+  const usePrice = isColumnEnabled('price');
+  const useWeight = isColumnEnabled('weight');
+  const useQty = isColumnEnabled('qty');
   itemsBody.querySelectorAll('tr').forEach(tr => {
     let supply;
     if (usePrice) {
-      const price = parseFloat(tr.querySelector('.f-price').value) || 0;
-      const qty = useQty ? (parseFloat(tr.querySelector('.f-qty').value) || 0) : 1;
-      supply = qty * price;
+      const price = parseFloat(tr.querySelector('.f-price')?.value) || 0;
+      // 중량이 있으면 수량 대신 중량을 단가와 곱한다 (generator.py와 동일한 규칙).
+      let multiplier = 1;
+      if (useWeight && tr.querySelector('.f-weight')) {
+        multiplier = parseFloat(tr.querySelector('.f-weight').value) || 0;
+      } else if (useQty && tr.querySelector('.f-qty')) {
+        multiplier = parseFloat(tr.querySelector('.f-qty').value) || 0;
+      }
+      supply = multiplier * price;
       tr.querySelector('.f-supply-calc').textContent = supply.toLocaleString();
     } else {
       supply = parseFloat(tr.querySelector('.f-supply-input').value) || 0;
@@ -613,6 +761,8 @@ function recalc() {
   document.getElementById('sumTotal').textContent = (sumSupply + sumVat).toLocaleString();
 }
 
+renderColumnToggles();
+renderItemsHeaderRow();
 document.getElementById('addRowBtn').addEventListener('click', () => addRow());
 addRow();
 
@@ -631,10 +781,10 @@ document.getElementById('reportForm').addEventListener('submit', async (e) => {
   const fd = new FormData(e.target);
   rows.forEach(tr => {
     fd.append('item_name[]', tr.querySelector('.f-name').value);
-    fd.append('item_spec[]', tr.querySelector('.f-spec').value);
-    fd.append('item_unit[]', tr.querySelector('.f-unit').value);
-    fd.append('item_qty[]', tr.querySelector('.f-qty').value);
-    fd.append('item_price[]', tr.querySelector('.f-price').value);
+    COLUMNS.forEach(col => {
+      const el = tr.querySelector(`.f-${col.key}`);
+      fd.append(`item_${col.key}[]`, el ? el.value : '');
+    });
     fd.append('item_supply[]', tr.querySelector('.f-supply-input').value);
   });
 
@@ -675,22 +825,50 @@ function escapeHtml(value) {
   return div.innerHTML;
 }
 
+function renderPdfDraftHeaderRow() {
+  const row = document.getElementById('pdfDraftHeaderRow');
+  let html = '<th style="border:1px solid var(--border);padding:6px;">품목</th>';
+  COLUMNS.forEach(col => {
+    html += `<th style="border:1px solid var(--border);padding:6px;">${escapeHtml(col.label)}</th>`;
+  });
+  html += '<th style="border:1px solid var(--border);padding:6px;"></th>';
+  row.innerHTML = html;
+}
+
 function addDraftRow(prefill) {
   prefill = prefill || {};
   const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-name" value="${escapeHtml(prefill.name || '')}" style="width:100%;border:none;"></td>
-    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-spec" value="${escapeHtml(prefill.spec || '')}" style="width:100%;border:none;"></td>
-    <td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-unit" value="${escapeHtml(prefill.unit || '')}" style="width:100%;border:none;"></td>
-    <td style="border:1px solid var(--border);padding:4px;"><input type="number" class="d-qty" value="${prefill.qty ?? ''}" style="width:100%;border:none;"></td>
-    <td style="border:1px solid var(--border);padding:4px;"><input type="number" class="d-price" value="${prefill.price ?? ''}" style="width:100%;border:none;"></td>
-    <td style="border:1px solid var(--border);padding:4px;"><button type="button" class="small removeDraftBtn">삭제</button></td>
-  `;
+  let html = `<td style="border:1px solid var(--border);padding:4px;"><input type="text" class="d-name" value="${escapeHtml(prefill.name || '')}" style="width:100%;border:none;"></td>`;
+  COLUMNS.forEach(col => {
+    const type = INPUT_TYPE[col.key] || 'text';
+    const raw = prefill[col.key];
+    const value = (raw === undefined || raw === null) ? '' : raw;
+    html += `<td style="border:1px solid var(--border);padding:4px;"><input type="${type}" class="d-${col.key}" value="${escapeHtml(String(value))}" style="width:100%;border:none;"></td>`;
+  });
+  html += '<td style="border:1px solid var(--border);padding:4px;"><button type="button" class="small removeDraftBtn">삭제</button></td>';
+  tr.innerHTML = html;
   pdfDraftBody.appendChild(tr);
   tr.querySelector('.removeDraftBtn').addEventListener('click', () => tr.remove());
 }
 
+function applyPdfFieldOrder(fieldOrder) {
+  if (!fieldOrder || !fieldOrder.length) return false;
+  const known = fieldOrder.filter(key => COLUMNS.some(c => c.key === key));
+  if (!known.length) return false;
+  const rest = COLUMNS.filter(c => !known.includes(c.key));
+  const byKey = Object.fromEntries(COLUMNS.map(c => [c.key, c]));
+  const reordered = [...known.map(key => byKey[key]), ...rest];
+  const changed = reordered.some((c, i) => c.key !== COLUMNS[i].key);
+  COLUMNS = reordered;
+  if (changed) saveColumnOrder();
+  return changed;
+}
+
 function openPdfModal(result) {
+  if (applyPdfFieldOrder(result.field_order)) {
+    rerenderColumns();
+  }
+  renderPdfDraftHeaderRow();
   pdfDraftBody.innerHTML = '';
   pdfImagePane.innerHTML = '';
   pdfWarnings.textContent = (result.warnings || []).join(' ');
@@ -730,13 +908,15 @@ function closePdfModal() {
 }
 
 function collectDraftItems() {
-  return [...pdfDraftBody.querySelectorAll('tr')].map(tr => ({
-    name: tr.querySelector('.d-name').value,
-    spec: tr.querySelector('.d-spec').value,
-    unit: tr.querySelector('.d-unit').value,
-    qty: parseFloat(tr.querySelector('.d-qty').value) || 0,
-    price: parseFloat(tr.querySelector('.d-price').value) || 0,
-  })).filter(item => item.name.trim());
+  return [...pdfDraftBody.querySelectorAll('tr')].map(tr => {
+    const item = { name: tr.querySelector('.d-name').value };
+    COLUMNS.forEach(col => {
+      const el = tr.querySelector(`.d-${col.key}`);
+      if (!el) return;
+      item[col.key] = NUMERIC_KEYS.has(col.key) ? (parseFloat(el.value) || 0) : el.value;
+    });
+    return item;
+  }).filter(item => item.name.trim());
 }
 
 function applyDraftItems(mode) {

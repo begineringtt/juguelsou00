@@ -21,6 +21,7 @@ DEFAULT_COLUMNS = [
     {"key": "unit", "label": "단위", "enabled": True, "builtin": True},
     {"key": "qty", "label": "수량", "enabled": True, "builtin": True},
     {"key": "price", "label": "단가", "enabled": True, "builtin": True},
+    {"key": "weight", "label": "중량", "enabled": True, "builtin": True},
 ]
 
 

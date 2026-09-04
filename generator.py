@@ -27,13 +27,16 @@ from paths import bundle_dir
 BASE_DIR = bundle_dir()
 TEMPLATE_PATH = os.path.join(BASE_DIR, "template_files", "base_template.xlsx")
 
-SHEET_NAME = "지출결의서"
-
 FONT_NAME = "굴림"
 FONT_REGULAR = Font(name=FONT_NAME, size=10)
 FONT_BOLD = Font(name=FONT_NAME, size=10, bold=True)
 ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+ALIGN_CENTER_SHRINK = Alignment(horizontal="center", vertical="center", shrink_to_fit=True)
 ALIGN_LEFT = Alignment(horizontal="left", vertical="center")
+
+# 품목/규격 값은 길이가 들쭉날쭉해서, 셀 서식-맞춤-텍스트 조정을 "셀에 맞춤"으로
+# 걸어 둬야 긴 값이 다음 칸을 침범하지 않고 셀 안에서 자동으로 줄어든다.
+SHRINK_TO_FIT_FIELDS = {"name", "spec"}
 
 # 원본 템플릿이 수량/단가/공급가/부가세 칸(11~27행 O~AA열)에 미리 적용해 둔 회계
 # 표시 형식. 그 범위 밖(품목이 많아 새로 생긴 행)의 숫자 칸에도 명시적으로
@@ -79,13 +82,16 @@ SUPPLY_KEY = "supply"
 VAT_KEY = "vat"
 
 FIXED_LABELS = {NAME_KEY: "품목", SUPPLY_KEY: "공급가", VAT_KEY: "부가세"}
-WIDE_WEIGHTS = {NAME_KEY: 6, "spec": 5, "price": 3, SUPPLY_KEY: 3, VAT_KEY: 3}
-NARROW_BUILTIN_KEYS = {"unit", "qty"}
+WIDE_WEIGHTS = {
+    NAME_KEY: 7, "spec": 4, "unit": 2, "qty": 2, "weight": 2, "price": 4,
+    SUPPLY_KEY: 4, VAT_KEY: 4,
+}
 
 
 def _is_narrow(column_def):
-    """단위/수량, 그리고 모든 커스텀(비-builtin) 열은 셀 1칸(병합 없음)으로 고정한다."""
-    return column_def["key"] in NARROW_BUILTIN_KEYS or not column_def.get("builtin", True)
+    """모든 커스텀(비-builtin) 열은 셀 1칸(병합 없음)으로 고정한다. 내장 열(규격/단위/
+    수량/중량/단가)은 WIDE_WEIGHTS 비율대로 폭을 나눠 갖는다."""
+    return not column_def.get("builtin", True)
 
 
 def _infer_active_keys(items, configured_keys):
@@ -195,27 +201,42 @@ def _write_item_row(ws, row, layout, item, configured_columns):
     _apply_outer_frame(ws, row)
     ws[f"{_col_letter(layout, 'name')}{row}"] = item.get("name", "")
 
-    plain_keys = [c["key"] for c in configured_columns if c["key"] in layout and c["key"] not in ("qty", "price")]
+    plain_keys = [
+        c["key"] for c in configured_columns
+        if c["key"] in layout and c["key"] not in ("qty", "weight", "price")
+    ]
     for key in plain_keys:
         value = item.get(key)
         if value:
             ws[f"{_col_letter(layout, key)}{row}"] = value
 
     use_qty = "qty" in layout and item.get("qty") is not None
+    use_weight = "weight" in layout and item.get("weight") is not None
     use_price = "price" in layout and item.get("price") is not None
     supply_letter = _col_letter(layout, "supply")
     if use_qty:
         qty_cell = ws[f"{_col_letter(layout, 'qty')}{row}"]
         qty_cell.value = item["qty"]
         qty_cell.number_format = ACCOUNTING_NUMBER_FORMAT
+    if use_weight:
+        weight_cell = ws[f"{_col_letter(layout, 'weight')}{row}"]
+        weight_cell.value = item["weight"]
+        weight_cell.number_format = ACCOUNTING_NUMBER_FORMAT
     if use_price:
         price_letter = _col_letter(layout, "price")
         price_cell = ws[f"{price_letter}{row}"]
         price_cell.value = item["price"]
         price_cell.number_format = ACCOUNTING_NUMBER_FORMAT
-        if use_qty:
-            qty_letter = _col_letter(layout, "qty")
-            ws[f"{supply_letter}{row}"] = f"={qty_letter}{row}*{price_letter}{row}"
+        # 중량이 있으면 수량 대신 중량을 단가와 곱한다(중량 기준으로 판매하는
+        # 품목은 "수량"이 참고용으로만 함께 표시되고 계산에는 안 쓰인다).
+        if use_weight:
+            multiplier_letter = _col_letter(layout, "weight")
+        elif use_qty:
+            multiplier_letter = _col_letter(layout, "qty")
+        else:
+            multiplier_letter = None
+        if multiplier_letter:
+            ws[f"{supply_letter}{row}"] = f"={multiplier_letter}{row}*{price_letter}{row}"
         else:
             ws[f"{supply_letter}{row}"] = f"={price_letter}{row}"
     else:
@@ -227,8 +248,9 @@ def _write_item_row(ws, row, layout, item, configured_columns):
     vat_cell.number_format = ACCOUNTING_NUMBER_FORMAT
 
     _add_item_row_merges(ws, row, layout)
-    for start, end, _label in layout.values():
-        _style_span(ws, row, start, end, FONT_REGULAR)
+    for key, (start, end, _label) in layout.items():
+        alignment = ALIGN_CENTER_SHRINK if key in SHRINK_TO_FIT_FIELDS else ALIGN_CENTER
+        _style_span(ws, row, start, end, FONT_REGULAR, alignment=alignment)
 
 
 def _capture_footer_block(ws):
@@ -381,7 +403,6 @@ def build_expense_report(data):
     """
     wb = openpyxl.load_workbook(TEMPLATE_PATH)
     ws = wb.worksheets[0]
-    ws.title = SHEET_NAME
 
     ws["D6"] = data.get("company", "")
     ws["Q6"] = data.get("doc_number") or None

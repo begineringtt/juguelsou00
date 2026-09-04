@@ -38,6 +38,7 @@ HEADER_SYNONYMS = {
     "unit": ["단위", "단 위", "UNIT"],
     "qty": ["수량", "수 량", "Q'TY", "QTY", "QUANTITY"],
     "price": ["단가", "단 가", "UNIT PRICE", "PRICE"],
+    "weight": ["중량", "중 량", "중량(KG)", "무게", "WEIGHT", "W'T", "WT"],
 }
 
 _NUMBER_RE = re.compile(r"[0-9][0-9,.\s]*[0-9]|[0-9]")
@@ -794,6 +795,16 @@ def _parse_scanned_pdf(pdf_bytes, warnings, synonyms=None):
         return [], None, None
 
 
+def _detect_field_order(mapping):
+    """mapping["columns"]에 기록된 열 인덱스(왼쪽->오른쪽) 순서대로 필드 키 목록을
+    돌려준다 (품명 제외). 화면에서 품목 표 열 순서를 PDF와 맞추는 데 쓴다."""
+    if not mapping:
+        return None
+    columns = mapping.get("columns") or {}
+    fields = [field for field in columns if field != "name"]
+    return sorted(fields, key=lambda field: min(columns[field]))
+
+
 def parse_pdf_items(pdf_bytes, extra_fields=None):
     synonyms = HEADER_SYNONYMS
     if extra_fields:
@@ -814,6 +825,7 @@ def parse_pdf_items(pdf_bytes, extra_fields=None):
                 "warnings": warnings,
                 "company": company,
                 "title": title,
+                "field_order": None,
             }
 
         company = extract_company_name(full_text)
@@ -836,4 +848,13 @@ def parse_pdf_items(pdf_bytes, extra_fields=None):
                 items = []
                 warnings.append("표를 인식하지 못했습니다. 직접 입력해주세요.")
 
-    return {"items": items, "page_images": page_images, "warnings": warnings, "company": company, "title": title}
+        field_order = _detect_field_order(mapping)
+
+    return {
+        "items": items,
+        "page_images": page_images,
+        "warnings": warnings,
+        "company": company,
+        "title": title,
+        "field_order": field_order,
+    }

@@ -31,7 +31,7 @@ def test_get_column_settings_returns_defaults():
         resp = client.get("/column_settings")
         assert resp.status_code == 200
         body = resp.get_json()
-        assert [c["key"] for c in body["columns"]] == ["spec", "unit", "qty", "price"]
+        assert [c["key"] for c in body["columns"]] == ["spec", "unit", "qty", "price", "weight"]
     finally:
         restore()
     print("OK: test_get_column_settings_returns_defaults")
@@ -41,10 +41,10 @@ def test_add_column_route_then_it_appears_in_get():
     restore = _use_temp_data_dir()
     try:
         client = app_module.app.test_client()
-        resp = client.post("/column_settings/add", data={"label": "중량"})
+        resp = client.post("/column_settings/add", data={"label": "생산지"})
         assert resp.status_code == 200
         added = resp.get_json()["column"]
-        assert added["label"] == "중량"
+        assert added["label"] == "생산지"
 
         resp2 = client.get("/column_settings")
         assert added["key"] in [c["key"] for c in resp2.get_json()["columns"]]
@@ -72,7 +72,7 @@ def test_save_column_settings_route_reorders():
         reordered = list(reversed(columns))
         resp = client.post("/column_settings", json={"columns": reordered})
         assert resp.status_code == 200
-        assert [c["key"] for c in column_settings.load_columns()] == ["price", "qty", "unit", "spec"]
+        assert [c["key"] for c in column_settings.load_columns()] == ["weight", "price", "qty", "unit", "spec"]
     finally:
         restore()
     print("OK: test_save_column_settings_route_reorders")
@@ -94,7 +94,7 @@ def test_parse_pdf_route_passes_enabled_custom_labels_as_extra_fields():
     # extra_fields로 넘긴 채로 정상 응답해야 한다 (값 인식 여부는 이 테스트의 범위가 아님).
     restore = _use_temp_data_dir()
     try:
-        column_settings.add_custom_column("중량")
+        column_settings.add_custom_column("생산지")
         client = app_module.app.test_client()
 
         import fitz
