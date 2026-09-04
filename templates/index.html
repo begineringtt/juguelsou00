@@ -136,6 +136,12 @@
   }
   .totals b { color: var(--accent); font-size: 16px; }
   #msg { color: #b42318; font-size: 13px; margin-top: 6px; min-height: 18px; }
+  .spinner {
+    width: 36px; height: 36px; margin: 0 auto;
+    border: 4px solid #e4e7ec; border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -324,6 +330,14 @@
     <button type="submit" class="primary">엑셀 파일 생성</button>
     <div id="msg"></div>
   </form>
+
+  <div id="pdfLoadingOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;">
+    <div style="background:#fff;max-width:320px;margin:120px auto;border-radius:10px;padding:28px 24px;text-align:center;">
+      <div class="spinner"></div>
+      <p style="font-size:14px;margin:16px 0 4px;font-weight:600;">PDF 인식 중입니다...</p>
+      <p style="font-size:12.5px;color:#667085;margin:0;">스캔본(이미지) PDF는 OCR 처리 때문에 최대 1분 정도 걸릴 수 있습니다.</p>
+    </div>
+  </div>
 
   <div id="pdfModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;">
     <div style="background:#fff;max-width:1000px;margin:40px auto;border-radius:10px;padding:20px 24px;max-height:85vh;overflow:auto;">
@@ -948,15 +962,23 @@ function applyDraftItems(mode) {
 
 async function uploadPdfFile(file) {
   if (!file) return;
-  const fd = new FormData();
-  fd.append('file', file);
-  const res = await fetch('/parse_pdf', { method: 'POST', body: fd });
-  if (!res.ok) {
-    alert('PDF 인식에 실패했습니다.');
-    return;
+  const loadingOverlay = document.getElementById('pdfLoadingOverlay');
+  loadingOverlay.style.display = 'block';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/parse_pdf', { method: 'POST', body: fd });
+    if (!res.ok) {
+      alert('PDF 인식에 실패했습니다.');
+      return;
+    }
+    const result = await res.json();
+    openPdfModal(result);
+  } catch (err) {
+    alert('PDF 인식 중 오류가 발생했습니다: ' + err.message);
+  } finally {
+    loadingOverlay.style.display = 'none';
   }
-  const result = await res.json();
-  openPdfModal(result);
 }
 
 document.getElementById('pdfUploadBtn').addEventListener('click', () => {
