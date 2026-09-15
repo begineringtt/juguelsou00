@@ -1,7 +1,16 @@
 # PDF 헤더 매핑 개선 + 업체명 자동 인식 + 과제 프리셋 정리/CRUD — 설계안
 
-- 날짜: 2026-08-05
-- 상태: 설계 승인됨 (구현 대기)
+- 날짜: 2026-08-05 (설계), 2026-09-01 (실제 구현 상태 반영)
+- 상태: 부분 구현됨 — A항목은 설계대로 구현 완료, B/C항목은 목표는 달성했으나 설계와 다른 기술적 접근으로 구현됨, D항목은 CRUD 자체는 동작하나 스펙의 API 계약과 다름. 각 섹션 끝의 "실제 구현" 하위 항목 참고.
+
+## 구현 현황 요약
+
+| 항목 | 설계 | 실제 구현 | 판정 |
+|---|---|---|---|
+| A. PDF 헤더 동의어 확장 + 좌표 기반 복구 | `HEADER_SYNONYMS`에 QUANTITY/PRICE 추가 + fuzzy fallback, `find_tables()`+`crop()`으로 품목명 칸 복구 | 설계대로 구현 (커밋 `e8498fb`, `7d21523`, 계획 `docs/superpowers/plans/2026-08-31-pdf-header-matching-improvements.md`) | ✅ 구현 완료 |
+| B. 과제 프리셋 정리 + `short_name` | JSON에 `short_name` 필드 저장, 10개로 정리 | 10개 정리는 동일하게 됨. 필드명은 `short_name`이 아니라 `label`이며, 사용자가 지정하지 않으면 `PROJECT_LABEL_KEYWORDS` 키워드 매칭(`short_label()`)으로 매번 계산(`effective_label()`) | △ 목표 달성, 저장 방식 다름 |
+| C. PDF 업체명 자동 인식 | `extract_tables()`로 표 셀 라벨-값 매칭 우선 | `extract_company_name(text)`가 라인 단위 정규식 라벨 매칭 + `(주)`/`㈜`/`주식회사` 반복 빈도 추정으로 구현 — 표 셀 단위 접근 아님 | ✅ 목표 달성, 접근 방식 다름 |
+| D. 과제 프리셋 CRUD, id 기반 REST API | `id`(uuid4) 필드 + `POST/PUT/DELETE /api/projects/<id>` | `id` 필드 없음. `project_name`을 키로 쓰는 `POST /add_project`/`/update_project`/`/delete_project` (전부 POST). 프론트엔드 `<select>`의 `value`도 설계와 달리 여전히 배열 인덱스(`loop.index0`) 그대로 | △ CRUD는 동작하나 API 계약이 다름 |
 
 ## 배경
 
@@ -41,6 +50,14 @@
 - `test_pdf_item_parser.py`에 이 IR Cut 샘플용 케이스 추가 (품목 2개, 각각의 name/unit/qty/price 값 확인).
 - 기존 8개 샘플에 대한 기존 테스트가 계속 통과하는지 확인 (회귀 방지).
 
+### 실제 구현 (2026-09-01, 설계대로 구현 완료)
+
+`docs/superpowers/plans/2026-08-31-pdf-header-matching-improvements.md` 계획으로 진행, 두 태스크 모두 task 리뷰 및 최종 whole-branch 리뷰 승인.
+
+- **A-1 (헤더 동의어)**: `pdf_item_parser.py`의 `HEADER_SYNONYMS`에 `QUANTITY`(qty)/`PRICE`(price) 동의어 추가, `find_header_row`/`map_table_columns`가 정확 매칭 실패 시 기존 `match_field_fuzzy`로 한 번 더 시도하도록 fallback 연결. 설계 문서(A-1)와 구현이 정확히 일치 (커밋 `e8498fb`).
+- **A-2 (좌표 기반 품목명 복구)**: 새 순수 함수 `_recover_missing_name_column(table_x0, rows, row_cells, crop_text_fn)` 추가, `_find_best_table`이 `page.extract_tables()` 대신 `page.find_tables()` + `.extract()`를 호출해 셀 bbox 정보를 얻고 이 복구를 끼워 넣도록 변경. 이미 값이 있는 칸(bbox가 존재하는 칸)은 절대 건드리지 않음 — 설계(A-2)의 "빈 칸만 보충" 원칙 그대로 구현 (커밋 `7d21523`).
+- **테스트**: `test_parse_pdf_items_recovers_borderless_name_column_with_english_headers`를 실제 `견적서_20260721(그린플러스_IR Cut_8월).pdf` 샘플로 추가 — 설계에서 예상한 품목 2개(ETFE 필름, Nb2O5 관련 재료)와 각각의 qty/unit/price 값을 검증. 기존 8개 샘플 테스트 전부 회귀 없이 통과 확인.
+
 ## B. 과제 프리셋 정리 (중복 제거 + `short_name` 축약어)
 
 `data/projects.json`의 14개 항목을 아래 10개로 정리하고, 각 항목에 `short_name` 필드를 추가한다.
@@ -69,6 +86,12 @@
 - "과제 선택" `<select>`의 옵션 텍스트를 `project_name` 대신 `short_name`(없으면 `project_name`)으로 표시하고, `title` 속성에 전체 `project_name`을 넣어 마우스 오버 시 전체 과제명을 볼 수 있게 한다.
 - 옵션의 `value`는 배열 인덱스 대신 **항목의 고유 id**로 바꾼다 (아래 D에서 CRUD로 목록이 동적으로 바뀌므로 인덱스 기반 매칭은 깨지기 쉬움).
 
+### 실제 구현 (스펙과 다른 방식으로 구현됨)
+
+- **10개 정리**: 설계(B 표)와 동일한 10개 프로젝트가 `history_store.DEFAULT_PROJECTS`에 그대로 들어 있음 (커밋 `57e7c3a`). 이 부분은 설계 그대로 반영됨.
+- **`short_name` 필드는 없음**: 대신 `label`이라는 이름의 선택적 필드를 씀. 사용자가 관리 패널에서 명시적으로 축약명을 입력한 경우에만 `label`이 저장되고(`add_project`/`update_project`), 없으면 `PROJECT_LABEL_KEYWORDS`(키워드→축약명 매핑 테이블)를 이용한 `short_label(project_name)`으로 매번 즉석 계산 — 이 둘을 합친 게 `effective_label(project)` (`history_store.py:80-103`). `record_generation`/`merge_read_seed`로 자동 추가되는 항목은 `label`이 없는 채로 저장되고 화면에서는 키워드 매칭 결과가 표시됨 — 설계 §65의 "하위 호환 처리" 의도와 결과적으로 같음.
+- **프론트엔드 표시는 구현됨, `value`는 여전히 인덱스**: `templates/index.html:224`의 `<option value="{{ loop.index0 }}">{{ p.label }}</option>`처럼 옵션 텍스트는 `label`(= `effective_label` 결과)로 표시되지만, `value`는 설계에서 바꾸기로 한 "고유 id"가 아니라 여전히 배열 인덱스(`loop.index0`)다 — id 필드 자체가 없으므로(§D 참고) 이 부분은 구현되지 않았다. `title` 속성으로 전체 과제명을 보여주는 부분도 코드에 없음.
+
 ## C. PDF 업체명(거래처명) 자동 인식
 
 ### 인식 로직 (`pdf_item_parser.py`에 `extract_company_name(pdf_bytes)` 추가, `parse_pdf_items()` 결과에 `"company"` 키로 포함)
@@ -87,6 +110,12 @@
 - `/parse_pdf` 응답에 `company` 필드가 추가됨.
 - 모달 상단(경고 문구 아래)에 `company`가 인식된 경우에만 `인식된 업체명: {값} [기본정보에 반영 ✓]` 형태의 체크박스를 표시 (기본 체크됨).
 - "표에 적용" 버튼 클릭 시, 이 체크박스가 켜져 있으면 기본정보의 업체명 입력란(`input[name=company]`)에 값을 반영한다 (품목 반영과 별개 동작이며, 품목 교체/추가 선택과 무관하게 항상 적용).
+
+### 실제 구현 (목표는 달성, 접근 방식은 다름)
+
+- **인식 로직**: 설계와 달리 `extract_tables()`로 표 셀을 훑는 방식이 아니라, 페이지 전체 텍스트(`text`)를 줄 단위로 스캔해서 라벨 정규식(`_COMPANY_LABEL_PATTERNS`)으로 먼저 찾고, 실패하면 `(주)`/`㈜`/`주식회사` 반복 패턴(`_COMPANY_PATTERNS`)의 등장 빈도로 추정하는 방식으로 구현됨 (`pdf_item_parser.py:96` `extract_company_name(text)`, 커밋 `7164bd4`, rev.2 전환 커밋 `eeadc22`에서 배선). 함수 시그니처도 설계의 `extract_company_name(pdf_bytes)`가 아니라 이미 추출된 텍스트를 받는 `extract_company_name(text)`.
+- **자사명 오인식 방지**: 설계와 동일한 목적으로 `_OUR_COMPANY_MARKERS`(그린플러스/GREENPLUS 등)를 후보에서 제외하는 로직이 구현되어 있음 — 설계 §81의 안전장치 그대로.
+- **프론트엔드**: 설계는 "기본 체크된 체크박스"를 제안했지만, 실제로는 `pdfCompanyRow`(`templates/index.html:336`)라는 편집 가능한 텍스트 입력 행으로 구현되어 있고, 기본정보의 업체명란이 **비어 있을 때만** 자동으로 채워짐(`templates/index.html:751`, `!companyInput.value.trim()`) — 체크박스 온/오프 방식이 아니라 "값이 없을 때만 자동 채움 + 직접 수정 가능"으로 UX가 달라짐.
 
 ## D. 과제 프리셋 CRUD (추가/수정/삭제) — 즉시 반영
 
@@ -109,6 +138,13 @@
 - 맨 아래 빈 입력 행 + "추가" 버튼으로 신규 항목 등록.
 - 모든 동작은 `fetch()`로 위 API를 호출하고, 성공하면 클라이언트 메모리의 `PROJECTS` 배열을 갱신 → 관리 패널 표, "과제 선택" 드롭다운, 중앙행정기관/전문기관/과제명 datalist를 모두 다시 그린다 (페이지 새로고침 없음).
 - 삭제 시 간단한 `confirm()` 확인창을 띄운다 (되돌릴 수 없는 삭제이므로).
+
+### 실제 구현 (CRUD는 동작하나 API 계약이 다름)
+
+- **`id` 필드 없음**: `data/projects.json`의 각 항목에 `uuid4` 기반 `id`는 없다. 대신 `project_name` 문자열을 키로 사용한다.
+- **라우트**: 설계의 `POST /api/projects`·`PUT /api/projects/<id>`·`DELETE /api/projects/<id>` 대신, 전부 `POST`인 `app.py`의 `/add_project`(28행)·`/update_project`(45행)·`/delete_project`(63행) 3개 라우트로 구현됨 (커밋 `eeadc22`). 수정 시에는 `original_name`(변경 전 과제명)으로 대상을 찾으므로, **동명 과제가 있으면 잘못된 항목이 수정/삭제될 수 있는 취약점**이 있음 — id 기반이었다면 없었을 문제.
+- **프론트엔드 관리 패널**: "⚙ 과제 관리" 접이식 표 대신, "과제 선택" 옆에 `+ 새 과제 추가`/`수정`/`삭제` 버튼과 별도 패널(`#addProjectPanel`, `templates/index.html:227-231`)로 구현됨 — 목적(추가/수정/삭제를 새로고침 없이)은 동일하게 달성했으나 UI 구조는 설계의 "4+1열 표"가 아님.
+- **`value` 인덱스 기반 유지**: §B의 "실제 구현"에서 언급한 대로, `<select>`의 `value`가 여전히 `loop.index0`라서, 목록 순서가 바뀌거나 항목이 삭제/추가되면 이전에 선택돼 있던 옵션의 `value`가 다른 항목을 가리키게 될 수 있다 — id 기반으로 갔다면 방지됐을 문제이며, 위 `original_name` 기반 수정/삭제 취약점과 근본 원인이 같다(고유하고 불변인 식별자의 부재).
 
 ## 범위 밖
 
