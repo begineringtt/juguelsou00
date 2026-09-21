@@ -91,7 +91,50 @@ def test_record_generation_preserves_existing_custom_label():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def test_record_generation_matches_existing_project_by_label_not_exact_name():
+    tmp_dir = tempfile.mkdtemp()
+    original_history_path = history_store.HISTORY_PATH
+    original_projects_path = history_store.PROJECTS_PATH
+    try:
+        history_store.HISTORY_PATH = os.path.join(tmp_dir, "history.json")
+        history_store.PROJECTS_PATH = os.path.join(tmp_dir, "projects.json")
+        with open(history_store.PROJECTS_PATH, "w", encoding="utf-8") as f:
+            json.dump([{
+                "agency": "농림축산식품부",
+                "org": "농림식품기술기획평가원",
+                "project_name": "무인 자율형 K-Farm 고온성 작물 데모온실 구축 및 검증",
+            }], f, ensure_ascii=False)
+
+        # "과제 수정" 패널이 아니라 지출결의서 생성 화면에서, 과제명 표기가 가운뎃점
+        # 차이(K-Farm vs K·Farm)로 살짝 다르게 입력된 채 생성한 상황을 재현한다.
+        # 이전 버그: project_name이 완전히 같지 않으면 별개 과제로 취급해서, 같은
+        # 축약명("고온성")의 과제가 옛 값/새 값 두 개로 파일에 공존하게 됐다.
+        history_store.record_generation({
+            "agency": "(재)스마트팜연구개발사업단",
+            "org": "농림식품기술기획평가원",
+            "project_name": "무인 자율형 K·Farm 고온성 작물 데모온실 구축 및 검증",
+            "company": "업체", "title": "제목", "detail": "상세", "execution_note": "집행문구",
+        })
+
+        with open(history_store.PROJECTS_PATH, "r", encoding="utf-8") as f:
+            raw_projects = json.load(f)
+        assert len(raw_projects) == 1, (
+            "같은 축약명의 과제가 중복으로 남으면 안 된다: " + json.dumps(raw_projects, ensure_ascii=False)
+        )
+        assert raw_projects[0]["agency"] == "(재)스마트팜연구개발사업단"
+
+        reloaded = history_store.load_projects()
+        assert len(reloaded) == 1
+        assert reloaded[0]["agency"] == "(재)스마트팜연구개발사업단"
+        print("OK: test_record_generation_matches_existing_project_by_label_not_exact_name")
+    finally:
+        history_store.HISTORY_PATH = original_history_path
+        history_store.PROJECTS_PATH = original_projects_path
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_merge_read_seed_appends_new_values_only()
     test_record_generation_preserves_existing_custom_label()
+    test_record_generation_matches_existing_project_by_label_not_exact_name()
     print("ALL PASSED")

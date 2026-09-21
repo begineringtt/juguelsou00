@@ -74,11 +74,71 @@ pyinstaller 지출결의서생성기.spec
 ## 폴더 구조
 
 ```
-app.py              Flask 라우트
+app.py              Flask 라우트 (지출결의서 단독 + /batch 자동 정리)
 generator.py         엑셀 생성 로직 (template_files/base_template.xlsx 채우기)
 history_store.py     입력 이력/과제 프리셋 로컬 저장(JSON)
 pdf_item_parser.py    견적서 PDF에서 품목/업체명/내용(제목) 인식 (스캔 PDF는 OCR로 대체)
-templates/index.html  웹 UI
-template_files/       회사 지출결의서 원본 엑셀 양식
+templates/index.html  웹 UI (지출결의서 단독 생성)
+templates/batch.html  웹 UI (견적서 → 지출결의서·검수확인서 자동 정리)
+template_files/       회사 지출결의서/검수확인서 원본 엑셀 양식
 tesseract_bin/         스캔 PDF OCR용 Tesseract 실행 파일 + 한국어/영어 언어팩(번들)
+
+# 자동 정리 파이프라인 (신규)
+quote_reader.py       견적서 통합 리더 (PDF 표/좌표복원, JPG·PNG OCR, XLSX 직접 읽기)
+inspection_generator.py  검수확인서 생성 (template_files/inspection_template.xlsx 채우기)
+folder_router.py      과제 카테고리 → setting_03 폴더 매핑 + 업체 하위폴더 명명 규칙 학습
+checklist_updater.py  연구비 업로드 체크리스트 갱신(O 표시, 다른 이름 저장)
+report_writer.py      처리이력 보고서(누적 로그) 작성
+pdf_convert.py        xlsx → pdf (LibreOffice headless)
+pipeline.py           견적서 1건 → 문서 생성·PDF·매니페스트
+automation.py         상위 오케스트레이션 (폴더 배치 + 첨부 자동복사 + 체크리스트 + 보고서)
+attachment_finder.py  setting_03("서버")에서 업체별 통장사본·사업자등록증 색인/검색
+automation_cli.py     명령줄 실행 진입점
 ```
+
+## 견적서 → 지출결의서·검수확인서 자동 정리 (신규 기능)
+
+견적서 한 장을 올리면 다음을 한 번에 처리합니다.
+
+1. 견적서(PDF/JPG/PNG/XLSX)에서 품목·수량·단가·중량·공급가를 인식
+   - 표 격자선이 없는 견적서는 단어 좌표로 열을 복원 (예: 각파이프 견적서)
+   - JPG/PNG는 내장 Tesseract OCR, XLSX는 시트에서 직접 읽음
+2. **지출결의서**(기존 GP-A-001 양식)와 **검수확인서**(회사 제공 양식) 생성
+3. 둘 다 **PDF로 변환** (LibreOffice 필요 — 없으면 xlsx만 저장)
+4. 과제 카테고리에 맞는 `setting_03` 하위 폴더로 정리
+   - `중동` 카테고리는 자동으로 **IR 폴더**로 갑니다.
+   - 업체 하위폴더 이름은 그 카테고리의 기존 폴더 규칙(날짜형/N차형/평문)을 보고 자동 결정
+   - 견적서를 함께 정리
+   - **통장사본·사업자등록증은 setting_03의 기존 업체 폴더("서버")에서 업체명으로 자동
+     검색해 복사** (`attachment_finder.py`). 폴더명이 곧 업체명이라는 점을 이용하며,
+     날짜·차수 접두("2026-09-20 유진철강", "3차 유진철강")가 붙어 있어도 매칭합니다.
+     직접 올린 파일이 있으면 그게 우선합니다.
+5. **체크리스트**(`연구비 파일 업로드 체크용_*.xlsx`)의 해당 칸을 O로 갱신해 다른 이름으로 저장
+6. **처리이력 보고서**(`체크리스트/처리이력_보고서.xlsx`)에 한 줄 기록
+
+### 웹에서 쓰기
+
+앱 실행 후 `http://127.0.0.1:5000/batch` 로 이동 → setting_03 경로/카테고리/업체명을
+입력하고 견적서를 올린 뒤 실행. ‘미리보기(정리 안 함)’로 먼저 결과를 확인할 수 있습니다.
+
+### 명령줄에서 쓰기
+
+```bash
+python automation_cli.py --quote "견적서.pdf" --category 고효율 --company "유진철강산업㈜" \
+    --setting03 "D:\claude_personal\setting_03" \
+    --inspector "유찬희 책임연구원" --inspect-date 2026-09-21 \
+    --biz "사업자등록증.jpg" --bank "통장사본.jpg"      # --dry-run 으로 계획만 확인
+```
+
+### PDF 변환 준비물
+
+xlsx → pdf 변환에는 **LibreOffice**가 필요합니다(무료). 설치돼 있지 않으면 xlsx만
+저장되고 안내 메시지가 표시됩니다. Windows는 https://ko.libreoffice.org 에서 설치하면
+자동으로 인식됩니다.
+
+### 참고
+
+- 업체명은 견적서 로고(이미지)에만 있는 경우가 많아 자동 인식이 비어 있을 수 있습니다.
+  화면에서 업체명을 직접 입력/확인하세요(폴더명·검수확인서·체크리스트 매칭 기준).
+- 검수확인서의 ‘제품 사진’ 칸은 비워 두므로, 필요 시 사진을 수기로 붙여 넣으세요.
+- 체크리스트에 아직 없는 신규 업체는 오표기 대신 “찾지 못함”으로 안내합니다.

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>견적서 → 지출결의서·검수확인서 자동 정리</title>
+  <style>
+    :root { --line:#d9dee5; --brand:#2f7d32; --bg:#f6f8f7; --ink:#1c2530; }
+    * { box-sizing: border-box; }
+    body { font-family: "맑은 고딕","Malgun Gothic",system-ui,sans-serif; margin:0;
+           background:var(--bg); color:var(--ink); }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+    h1 { font-size: 20px; margin: 8px 0 4px; }
+    p.sub { color:#5b6673; margin:0 0 20px; font-size: 13px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:12px;
+            padding:18px; margin-bottom:16px; }
+    label { display:block; font-size:13px; font-weight:600; margin:12px 0 4px; }
+    input[type=text], input[type=date], select, input[type=file] {
+      width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px;
+      font-size:14px; background:#fff; }
+    .row { display:flex; gap:12px; }
+    .row > div { flex:1; }
+    .hint { font-size:12px; color:#7a8590; margin-top:3px; }
+    button { background:var(--brand); color:#fff; border:0; border-radius:8px;
+             padding:12px 20px; font-size:15px; font-weight:700; cursor:pointer; }
+    button.secondary { background:#fff; color:var(--ink); border:1px solid var(--line); }
+    .actions { display:flex; gap:10px; align-items:center; margin-top:18px; }
+    #result { white-space:pre-wrap; font-size:13px; }
+    .ok { color:#1b7f2b; } .warn { color:#b26a00; } .err { color:#c0392b; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
+    th,td { border:1px solid var(--line); padding:6px 8px; text-align:left; }
+    a.top { font-size:13px; color:var(--brand); text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="top" href="/">← 지출결의서 단독 생성 화면</a>
+    <h1>견적서 → 지출결의서·검수확인서 자동 정리</h1>
+    <p class="sub">견적서(PDF/JPG/XLSX)를 올리면 지출결의서와 검수확인서를 만들고 PDF로 변환해
+      과제·업체 폴더에 정리하고, 통장사본·사업자등록증은 setting_03의 기존 폴더에서
+      자동으로 찾아 복사한 뒤 체크리스트와 처리이력을 갱신합니다.</p>
+
+    <form id="f">
+      <div class="card">
+        <label>setting_03 폴더 경로 *</label>
+        <input type="text" name="setting03_root" value="{{ setting03_root }}"
+               placeholder="예: D:\claude_personal\setting_03">
+        <div class="hint">이 PC에서 문서를 정리해 넣을 최상위 폴더입니다. 한 번 입력하면 저장됩니다.</div>
+
+        <div class="row">
+          <div>
+            <label>과제 카테고리 *</label>
+            <select name="category">
+              {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+            </select>
+            <div class="hint">‘중동’은 자동으로 IR 폴더에 정리됩니다.</div>
+          </div>
+          <div>
+            <label>업체명 *</label>
+            <input type="text" name="company" placeholder="예: 유진철강산업㈜">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label>견적서 파일 * (PDF / JPG / PNG / XLSX)</label>
+        <input type="file" name="quote" accept=".pdf,.jpg,.jpeg,.png,.xlsx">
+        <div class="row">
+          <div><label>검수자 성명</label><input type="text" name="inspector" placeholder="예: 유찬희 책임연구원"></div>
+          <div><label>검수일</label><input type="date" name="inspect_date"></div>
+        </div>
+        <div class="row">
+          <div><label>청구인</label><input type="text" name="requester"></div>
+          <div><label>폴더명 품목 접미(팁스 등, 선택)</label><input type="text" name="product"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label>첨부문서 (선택 — 비워두면 자동)</label>
+        <div class="hint">통장사본·사업자등록증은 setting_03의 기존 업체 폴더에서 자동으로 찾아
+          복사합니다. 자동으로 못 찾거나 새 파일로 덮어쓰려면 아래에 직접 올리세요.</div>
+        <div class="row">
+          <div><label>사업자등록증</label><input type="file" name="biz"></div>
+          <div><label>통장사본</label><input type="file" name="bank"></div>
+        </div>
+        <div class="row">
+          <div><label>전자세금계산서</label><input type="file" name="tax"></div>
+          <div><label>거래명세서</label><input type="file" name="statement"></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit">실행 (폴더에 정리)</button>
+        <button type="button" class="secondary" id="dry">미리보기(정리 안 함)</button>
+      </div>
+    </form>
+
+    <div class="card" id="resultCard" style="display:none">
+      <div id="result"></div>
+    </div>
+  </div>
+
+<script>
+const f = document.getElementById('f');
+const resultCard = document.getElementById('resultCard');
+const result = document.getElementById('result');
+
+async function run(dry) {
+  const fd = new FormData(f);
+  if (dry) fd.set('dry_run', '1');
+  resultCard.style.display = 'block';
+  result.innerHTML = '처리 중입니다… (PDF 변환 때문에 십여 초 걸릴 수 있어요)';
+  try {
+    const res = await fetch('/batch_run', { method:'POST', body: fd });
+    const d = await res.json();
+    if (!res.ok) { result.innerHTML = '<span class="err">오류: ' + (d.error||'') + '</span>'; return; }
+    let html = '';
+    html += `<b>${d.company}</b> · ${d.category} → 폴더 <b>${d.category_folder}</b>\n`;
+    html += `대상 폴더: <b>${d.target_folder_name}</b> ` +
+            (d.target_folder_is_new ? '<span class="warn">(신규 생성)</span>' : '(기존 폴더)') + '\n';
+    html += `품목 ${d.item_count}개 · 견적 총액 ${Number(d.total_supply).toLocaleString()}원 · 인식방식 ${d.quote_source}\n`;
+    if (d.pdf_error) html += `<span class="warn">[PDF] ${d.pdf_error}</span>\n`;
+    if (d.warnings && d.warnings.length) html += `<span class="warn">[주의] ${d.warnings.join(' / ')}</span>\n`;
+    if (d.items && d.items.length) {
+      html += '<table><tr><th>품목</th><th>규격</th><th>수량</th><th>단가</th><th>중량</th></tr>';
+      for (const it of d.items) html += `<tr><td>${it.name||''}</td><td>${it.spec||''}</td>`+
+        `<td>${it.qty??''}</td><td>${it.price??''}</td><td>${it.weight??''}</td></tr>`;
+      html += '</table>';
+    }
+    if (d.attachments_from_repo && Object.keys(d.attachments_from_repo).length) {
+      html += '\n<span class="ok"><b>서버(setting_03)에서 자동으로 찾은 문서</b></span>\n' +
+        Object.entries(d.attachments_from_repo).map(([k,v]) => `· ${k}: ${v}`).join('\n') + '\n';
+    }
+    if (d.placed_files && d.placed_files.length) {
+      html += '\n<b>정리된 파일</b>\n' + d.placed_files.map(x => '· ' + x).join('\n') + '\n';
+    }
+    if (d.checklist) {
+      if (d.checklist.misses && d.checklist.misses.length)
+        html += `\n<span class="warn">[체크리스트] ${d.checklist.misses.join(' / ')}</span>`;
+      else
+        html += `\n<span class="ok">[체크리스트] ${d.checklist.marked.length}개 셀에 O 표시 완료</span>`;
+    }
+    if (d.report_path) html += `\n[처리이력] ${d.report_path}`;
+    result.innerHTML = html;
+  } catch (e) {
+    result.innerHTML = '<span class="err">요청 실패: ' + e + '</span>';
+  }
+}
+f.addEventListener('submit', e => { e.preventDefault(); run(false); });
+document.getElementById('dry').addEventListener('click', () => run(true));
+</script>
+</body>
+</html>

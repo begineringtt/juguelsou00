@@ -1,15 +1,37 @@
+import json
+import os
+import tempfile
 import threading
 import webbrowser
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 
+import automation
 import column_settings
+import folder_router
 import history_store
 import read_seed
 from generator import build_expense_report, suggest_filename
+from paths import app_dir
 from pdf_item_parser import parse_pdf_items
 
 app = Flask(__name__)
+
+_CONFIG_PATH = os.path.join(app_dir(), "data", "app_config.json")
+
+
+def _load_config():
+    try:
+        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_config(cfg):
+    os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
+    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
 @app.route("/")
@@ -211,8 +233,94 @@ def generate():
     )
 
 
+DEFAULT_SETTING03 = r"D:\claude_personal\setting_03"
+
+
+@app.route("/batch", methods=["GET"])
+def batch_page():
+    cfg = _load_config()
+    return render_template(
+        "batch.html",
+        categories=folder_router.CATEGORY_CHOICES,
+        setting03_root=cfg.get("setting03_root", "") or DEFAULT_SETTING03,
+    )
+
+
+def _save_upload(file_storage):
+    """업로드 파일을 임시 폴더에 원래 확장자로 저장하고 경로 반환."""
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1]
+    fd, path = tempfile.mkstemp(suffix=ext)
+    os.close(fd)
+    file_storage.save(path)
+    return path
+
+
+@app.route("/batch_run", methods=["POST"])
+def batch_run():
+    form = request.form
+    setting03_root = form.get("setting03_root", "").strip()
+    category = form.get("category", "").strip()
+    company = form.get("company", "").strip()
+    if not (setting03_root and category and company):
+        return jsonify({"error": "setting_03 경로 / 카테고리 / 업체명은 필수입니다."}), 400
+    if not os.path.isdir(setting03_root):
+        return jsonify({"error": f"setting_03 경로를 찾을 수 없습니다: {setting03_root}"}), 400
+
+    # 설정 저장(다음 실행 때 경로 자동 채움)
+    cfg = _load_config()
+    cfg["setting03_root"] = setting03_root
+    _save_config(cfg)
+
+    quote_path = _save_upload(request.files.get("quote"))
+    if not quote_path:
+        return jsonify({"error": "견적서 파일을 첨부해주세요."}), 400
+
+    attachments = {}
+    for field, label in (("biz", "사업자등록증"), ("bank", "통장사본"),
+                         ("tax", "전자세금계산서"), ("statement", "거래명세서")):
+        p = _save_upload(request.files.get(field))
+        if p:
+            attachments[label] = p
+
+    try:
+        manifest = automation.run(
+            quote_path, category, company, setting03_root,
+            inspector=form.get("inspector", "").strip(),
+            inspect_date=form.get("inspect_date", "").strip() or None,
+            requester=form.get("requester", "").strip(),
+            product=form.get("product", "").strip() or None,
+            attachments=attachments,
+            place=(form.get("dry_run") != "1"),
+        )
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+    # 직렬화 가능한 요약만 반환
+    return jsonify({
+        "company": manifest["company"],
+        "category": manifest["category"],
+        "category_folder": manifest["category_folder"],
+        "target_folder_name": manifest["target_folder_name"],
+        "target_folder_is_new": manifest["target_folder_is_new"],
+        "target_dir": manifest.get("target_dir"),
+        "item_count": manifest["item_count"],
+        "total_supply": manifest["total_supply"],
+        "quote_source": manifest["quote_source"],
+        "items": manifest["items"],
+        "warnings": manifest["warnings"],
+        "pdf_error": manifest.get("pdf_error"),
+        "placed_files": manifest.get("placed_files", []),
+        "attachments_from_repo": manifest.get("attachments_from_repo", {}),
+        "checklist": manifest.get("checklist"),
+        "report_path": manifest.get("report_path"),
+    })
+
+
 def _open_browser():
-    webbrowser.open("http://127.0.0.1:5000")
+    # 기본 화면을 '견적서 자동 정리(/batch)'로 연다.
+    webbrowser.open("http://127.0.0.1:5000/batch")
 
 
 if __name__ == "__main__":

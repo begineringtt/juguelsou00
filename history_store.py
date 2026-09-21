@@ -222,18 +222,23 @@ def record_generation(data):
     if project_name:
         projects = load_projects()
         existing = next((p for p in projects if p.get("project_name") == project_name), None)
-        projects = [p for p in projects if p.get("project_name") != project_name]
-        entry = {
-            "agency": (data.get("agency") or "").strip(),
-            "org": (data.get("org") or "").strip(),
-            "project_name": project_name,
-        }
+        if existing is None:
+            # project_name이 완전히 같지 않으면 별개 과제로 취급하면, 가운뎃점 표기 차이
+            # 등 이문(異文)이 섞여 들어왔을 때 "+ 새 과제 추가"/"수정"과 다른 기준으로
+            # 중복 판정을 하게 되어 같은 축약명(예: "고온성")의 과제가 옛 값/새 값 두
+            # 개로 파일에 공존하다가, 다음 load_projects() 호출 때 임의로 하나가 지워지는
+            # 문제가 있었다. project_name이 정확히 안 맞으면 축약명(키워드) 기준으로도
+            # 같은 과제인지 확인한다.
+            existing = next(
+                (p for p in projects if effective_label(p) == short_label(project_name)),
+                None,
+            )
+        entry = _build_project_entry(data.get("agency"), data.get("org"), project_name)
         # 지출결의서 생성 폼에는 축약명 입력칸이 없어서, 이미 "+ 새 과제 추가"/"수정"으로
         # 지정해 둔 축약명이 있으면 그대로 유지한다 (안 그러면 생성할 때마다 지워짐).
         if existing and existing.get("label"):
             entry["label"] = existing["label"]
-        projects.insert(0, entry)
-        _save_json(PROJECTS_PATH, projects[:MAX_PROJECTS])
+        _upsert_project(entry, exclude_name=existing.get("project_name") if existing else None)
 
 
 def merge_read_seed(seed):
