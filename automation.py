@@ -80,10 +80,12 @@ def run(quote_path, category, company, setting03_root, *,
     target_dir = os.path.join(category_root, manifest["target_folder_name"])
     manifest["target_dir"] = target_dir
 
+    combined_pdf_files = [manifest["combined_pdf"]] if manifest.get("combined_pdf") else []
     placed = []
     if place:
         for path in (manifest["generated_xlsx"] + manifest["generated_pdf"]
-                     + list(manifest["attachments_copied"].values())):
+                     + list(manifest["attachments_copied"].values())
+                     + combined_pdf_files):
             if os.path.isfile(path):
                 placed.append(_safe_move(path, target_dir))
         manifest["placed_files"] = placed
@@ -114,6 +116,7 @@ def run(quote_path, category, company, setting03_root, *,
             "item_count": manifest["item_count"],
             "source": manifest["quote_source"],
             "note": "; ".join(manifest["warnings"]) if manifest["warnings"] else "",
+            "combined_pdf": bool(manifest.get("combined_pdf")),
         })
         manifest["report_path"] = report_path
 

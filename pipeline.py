@@ -9,6 +9,7 @@ import datetime
 import os
 import shutil
 
+import combined_pdf
 import folder_router
 import history_store
 import inspection_generator
@@ -73,6 +74,7 @@ def process_quote(
     attachments=None,
     product=None,
     make_pdf=True,
+    make_combined_pdf=True,
 ):
     """전체 파이프라인 실행. 반환: manifest dict."""
     os.makedirs(out_dir, exist_ok=True)
@@ -129,16 +131,21 @@ def process_quote(
     generated = [expense_xlsx, insp_xlsx]
 
     # 3) PDF 변환
-    pdfs = []
+    expense_pdf = None
+    insp_pdf = None
     pdf_error = None
     if make_pdf and pdf_convert.available():
-        for x in (expense_xlsx, insp_xlsx):
-            try:
-                pdfs.append(pdf_convert.xlsx_to_pdf(x, out_dir=out_dir))
-            except Exception as e:
-                pdf_error = str(e)
+        try:
+            expense_pdf = pdf_convert.xlsx_to_pdf(expense_xlsx, out_dir=out_dir)
+        except Exception as e:
+            pdf_error = str(e)
+        try:
+            insp_pdf = pdf_convert.xlsx_to_pdf(insp_xlsx, out_dir=out_dir)
+        except Exception as e:
+            pdf_error = str(e)
     elif make_pdf:
         pdf_error = "LibreOffice 미설치로 PDF 변환을 건너뜀"
+    pdfs = [p for p in (expense_pdf, insp_pdf) if p]
 
     # 4) 첨부문서(견적서/사업자등록증/통장사본/전자세금계산서/거래명세서) 복사
     attachments = attachments or {}
@@ -160,6 +167,22 @@ def process_quote(
 
     docs_done = ["견적서", "지출결의서", "검수확인서"] + [k for k in copied if k != "견적서"]
 
+    # 6) 통합 출력용 병합 PDF (견적서 -> 지출결의서 -> 사업자등록증 -> 통장사본, 검수확인서 제외)
+    # 제공되지 않은 첨부(None)는 애초에 시도하지 않은 것이므로 skipped에 넣지 않는다.
+    if make_combined_pdf:
+        combined_inputs = [p for p in (
+            quote_dest,
+            expense_pdf or expense_xlsx,
+            copied.get("사업자등록증"),
+            copied.get("통장사본"),
+        ) if p]
+        combined_result = combined_pdf.build_combined_pdf(
+            combined_inputs,
+            os.path.join(out_dir, f"통합출력_{company_clean}_{cat_label}.pdf"),
+        )
+    else:
+        combined_result = {"path": None, "skipped": []}
+
     return {
         "company": company,
         "category": category,
@@ -176,6 +199,8 @@ def process_quote(
         "pdf_error": pdf_error,
         "attachments_copied": copied,
         "docs_done": docs_done,
+        "combined_pdf": combined_result["path"],
+        "combined_pdf_skipped": combined_result["skipped"],
         "warnings": warnings,
         "quote_source": quote["source"],
         "title": title,

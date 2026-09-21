@@ -31,6 +31,8 @@ def main(argv=None):
     ap.add_argument("--tax", default=None, help="전자세금계산서 파일")
     ap.add_argument("--statement", default=None, help="거래명세서 파일")
     ap.add_argument("--no-pdf", action="store_true", help="PDF 변환 건너뜀")
+    ap.add_argument("--no-combined-pdf", action="store_true",
+                    help="견적서/지출결의서/사업자등록증/통장사본 통합 출력 PDF 생성 건너뜀")
     ap.add_argument("--dry-run", action="store_true", help="목표 폴더로 옮기지 않고 계획만")
     args = ap.parse_args(argv)
 
@@ -50,6 +52,7 @@ def main(argv=None):
         requester=args.requester, product=args.product,
         attachments=attachments, place=not args.dry_run,
         make_pdf=not args.no_pdf,
+        make_combined_pdf=not args.no_combined_pdf,
     )
 
     print("=" * 60)
@@ -71,6 +74,10 @@ def main(argv=None):
             print("[체크리스트] " + " / ".join(ck["misses"]))
         else:
             print(f"[체크리스트] {len(ck['marked'])}개 셀 O 표시")
+    if m.get("combined_pdf"):
+        print("[통합출력]", m["combined_pdf"])
+    elif m.get("combined_pdf_skipped"):
+        print("[통합출력] 생성 실패: " + " / ".join(f"{p}: {r}" for p, r in m["combined_pdf_skipped"]))
     if m.get("report_path"):
         print("[보고서]", m["report_path"])
     print("=" * 60)

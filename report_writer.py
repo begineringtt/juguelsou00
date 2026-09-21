@@ -13,7 +13,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 HEADERS = [
     "처리일시", "과제 카테고리", "업체명", "대상 폴더",
     "생성 문서", "정리한 첨부문서", "견적 총액(원)", "품목 수",
-    "견적서 인식방식", "비고",
+    "견적서 인식방식", "비고", "통합PDF",
 ]
 
 _HEADER_FILL = PatternFill("solid", fgColor="2F5597")
@@ -22,7 +22,7 @@ _BODY_FONT = Font(name="맑은 고딕", size=10)
 _ALIGN = Alignment(vertical="center", wrap_text=True)
 _THIN = Side(style="thin", color="D0D0D0")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
-_WIDTHS = [18, 12, 20, 30, 22, 28, 14, 8, 14, 24]
+_WIDTHS = [18, 12, 20, 30, 22, 28, 14, 8, 14, 24, 10]
 
 
 def _new_workbook():
@@ -71,6 +71,7 @@ def append_entry(report_path, entry):
         entry.get("item_count"),
         _join(entry.get("source")),
         _join(entry.get("note")),
+        "O" if entry.get("combined_pdf") else "",
     ]
     r = ws.max_row + 1
     for i, val in enumerate(row, start=1):

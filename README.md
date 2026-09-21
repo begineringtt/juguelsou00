@@ -57,6 +57,10 @@ python test_generator.py
 python test_history_store_merge.py
 python test_read_seed.py
 python test_pdf_item_parser.py
+python test_pdf_convert.py
+python test_combined_pdf.py
+python test_pipeline_combined_pdf.py
+python test_automation_combined_pdf.py
 ```
 
 `test_pdf_item_parser.py`의 일부 테스트는 사내 견적서 PDF 샘플(`PDF_read/` 폴더, git에
@@ -90,7 +94,8 @@ folder_router.py      과제 카테고리 → setting_03 폴더 매핑 + 업체 
 checklist_updater.py  연구비 업로드 체크리스트 갱신(O 표시, 다른 이름 저장)
 report_writer.py      처리이력 보고서(누적 로그) 작성
 pdf_convert.py        xlsx → pdf (LibreOffice headless)
-pipeline.py           견적서 1건 → 문서 생성·PDF·매니페스트
+combined_pdf.py        견적서·지출결의서·사업자등록증·통장사본을 한 PDF로 병합(통합 출력)
+pipeline.py           견적서 1건 → 문서 생성·PDF·통합출력·매니페스트
 automation.py         상위 오케스트레이션 (폴더 배치 + 첨부 자동복사 + 체크리스트 + 보고서)
 attachment_finder.py  setting_03("서버")에서 업체별 통장사본·사업자등록증 색인/검색
 automation_cli.py     명령줄 실행 진입점
@@ -115,6 +120,11 @@ automation_cli.py     명령줄 실행 진입점
      직접 올린 파일이 있으면 그게 우선합니다.
 5. **체크리스트**(`연구비 파일 업로드 체크용_*.xlsx`)의 해당 칸을 O로 갱신해 다른 이름으로 저장
 6. **처리이력 보고서**(`체크리스트/처리이력_보고서.xlsx`)에 한 줄 기록
+7. **통합 출력**: 견적서 → 지출결의서 → 사업자등록증 → 통장사본 순서로 한 PDF에 병합한
+   `통합출력_{업체명}_{카테고리}.pdf`를 대상 폴더에 함께 생성 (검수확인서는 제외 —
+   서명/확인이 필요해 별도로 처리). 일부 파일이 없거나 변환에 실패해도(예: LibreOffice
+   미설치로 xlsx 변환 불가) 나머지만으로 병합하고, 못 넣은 파일과 이유는 처리 결과에
+   남는다. CLI에서는 `--no-combined-pdf`로 끌 수 있다.
 
 ### 웹에서 쓰기
 

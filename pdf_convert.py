@@ -45,9 +45,13 @@ def xlsx_to_pdf(xlsx_path, out_dir=None, timeout=180):
 
     # 동시 실행 충돌을 피하려고 프로필 디렉터리를 매번 임시로 분리
     with tempfile.TemporaryDirectory() as profile:
+        # Windows 경로(백슬래시)를 그대로 file:// 뒤에 붙이면 잘못된 URI가 되어
+        # LibreOffice가 부트스트랩에 실패한다(예: "bootstrap.ini가 손상됨" 오류).
+        # 슬래시로 바꾸고 file:/// 형태로 정규화해야 한다.
+        profile_uri = "file:///" + profile.replace("\\", "/").lstrip("/")
         cmd = [
             soffice, "--headless", "--norestore", "--nolockcheck",
-            f"-env:UserInstallation=file://{profile}",
+            f"-env:UserInstallation={profile_uri}",
             "--convert-to", "pdf:calc_pdf_Export",
             "--outdir", out_dir, xlsx_path,
         ]
