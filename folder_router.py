@@ -40,13 +40,17 @@ CATEGORY_CHOICES = ["자동화", "고효율", "북미", "중동", "고온성", "
 
 def folder_for_category(category):
     key = (category or "").strip()
+    if not key:
+        raise ValueError(f"알 수 없는 과제 카테고리입니다: {category!r}")
     if key in CATEGORY_TO_FOLDER:
         return CATEGORY_TO_FOLDER[key]
     # 부분 일치(예: "중동 등 수출..." 같은 과제명)
     for k, v in CATEGORY_TO_FOLDER.items():
         if k and k in key:
             return v
-    raise ValueError(f"알 수 없는 과제 카테고리입니다: {category!r}")
+    # 사용자가 배치/과제 정보 화면에서 직접 추가한, 고정 목록에 없는 과제 라벨은
+    # 라벨 이름 그대로를 setting_03 하위 폴더명으로 쓴다(새 폴더는 필요 시 자동 생성됨).
+    return key
 
 
 def category_root(setting03_root, category):

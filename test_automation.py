@@ -26,6 +26,13 @@ class FolderRouterTest(unittest.TestCase):
     def test_고효율_maps_to_광원폴더(self):
         self.assertEqual(folder_router.folder_for_category("고효율"), "고효율 광원")
 
+    def test_unknown_category_falls_back_to_the_label_itself(self):
+        # 사용자가 배치 화면에서 직접 추가한 과제(예: DEFAULT_PROJECTS의 "탄소"/"로봇"
+        # 라벨이나 완전히 새로운 과제명)는 CATEGORY_TO_FOLDER에 없어도 라벨 이름으로
+        # setting_03 아래 폴더를 잡을 수 있어야 한다 (예외로 배치 실행이 막히면 안 됨).
+        self.assertEqual(folder_router.folder_for_category("탄소"), "탄소")
+        self.assertEqual(folder_router.folder_for_category("로봇"), "로봇")
+
     def test_date_pattern_new_folder(self):
         sib = ["2026-09-20 유진철강", "2026.09.01 코리아농업개발"]
         name, is_new, pat = folder_router.propose_company_folder(

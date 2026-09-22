@@ -389,9 +389,13 @@ def _read_image_quote(data_bytes, extra_fields=None):
     img = Image.open(io.BytesIO(data_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
+    # _parse_scanned_pdf()(스캔 PDF 경로)와 동일하게, 회전 보정 후 그레이스케일->
+    # 이진화->deskew->노이즈제거 전처리를 거친 이미지로 OCR한다.
+    img = P._preprocess_for_ocr(P.fix_image_orientation(img))
     warnings = ["이미지(JPG/PNG) 견적서는 OCR로 인식했습니다. 인식 결과를 원본과 꼭 대조해주세요."]
     try:
-        items = P.ocr_extract_items(img, synonyms=synonyms)
+        items, _mapping = P.ocr_extract_items(img, synonyms=synonyms)
+        items = items or []
     except Exception as e:
         items = []
         warnings.append(f"OCR 품목 인식에 실패했습니다: {type(e).__name__}")

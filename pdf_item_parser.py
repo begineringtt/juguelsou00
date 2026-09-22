@@ -572,6 +572,22 @@ def _deskew(binary):
     )
 
 
+def fix_image_orientation(pil_image):
+    """휴대폰으로 옆으로 눕혀 찍은 견적서 사진처럼 90/180/270도 통째로 돌아간
+    이미지를 Tesseract OSD(방향 감지)로 바로 세운다. `_deskew()`는 수 도 단위
+    미세 기울기만 보정할 뿐 이런 큰 회전은 못 잡아서 별도로 필요하다.
+    감지에 실패하면(텍스트가 너무 적거나 흐린 경우 등) 원본을 그대로 돌려준다."""
+    _configure_tesseract()
+    try:
+        osd = pytesseract.image_to_osd(pil_image, output_type=pytesseract.Output.DICT)
+        rotate = int(osd.get("rotate", 0) or 0)
+    except Exception:
+        return pil_image
+    if rotate % 360 == 0:
+        return pil_image
+    return pil_image.rotate(-rotate, expand=True)
+
+
 def _preprocess_for_ocr(pil_image):
     """OCR 정확도를 높이기 위한 전처리: 그레이스케일 -> Otsu 이진화 -> deskew(기울기
     보정) -> 노이즈 제거. 입력/출력 모두 PIL Image(그레이스케일)."""
