@@ -79,6 +79,20 @@ class InspectionGeneratorTest(unittest.TestCase):
         self.assertEqual(ws["J40"].value, "홍길동")
         self.assertEqual(len(ws._images), 6)  # 양식 이미지 보존
 
+    def test_supply_amount_is_not_shown_on_the_inspection_report(self):
+        # 검수확인서는 품목/규격/수량이 맞는지만 확인하는 문서라 금액(공급가)이
+        # 노출되면 안 된다 - 지출결의서에만 있어야 할 정보.
+        buf = inspection_generator.build_inspection_report({
+            "company": "테스트㈜", "items": self._items(2),
+            "inspector": "홍길동", "inspect_date": "2026-09-21"})
+        wb = openpyxl.load_workbook(io.BytesIO(buf.getvalue()))
+        ws = wb.active
+        self.assertIsNone(ws["I7"].value)
+        self.assertIsNone(ws["I8"].value)
+        # 규격/수량은 그대로 채워져야 한다.
+        self.assertEqual(ws["F7"].value, "S1")
+        self.assertEqual(ws["G7"].value, 1)
+
     def test_overflow_rows_shift_footer(self):
         buf = inspection_generator.build_inspection_report({
             "company": "테스트㈜", "items": self._items(9),

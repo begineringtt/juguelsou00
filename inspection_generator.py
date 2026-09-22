@@ -195,10 +195,9 @@ def build_inspection_report(data):
         qcell.value = qty if qty is not None else ""
         if isinstance(qty, float) and qty.is_integer():
             qcell.value = int(qty)
-        supply = item_supply_amount(item)
-        scell = ws[f"{COL_SUPPLY}{row}"]
-        scell.value = supply
-        scell.number_format = "#,##0"
+        # 검수확인서는 품목/규격/수량만 확인하는 문서라 금액(공급가)은 노출하지
+        # 않는다 - 양식 원본의 "내용작성" 플레이스홀더도 함께 지운다.
+        ws[f"{COL_SUPPLY}{row}"] = None
         note = item.get("note")
         if note:
             ws[f"{COL_NOTE}{row}"] = note
