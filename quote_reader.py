@@ -354,6 +354,40 @@ def read_quote(path=None, data_bytes=None, ext=None, extra_fields=None, company_
     return _read_pdf_quote(data_bytes, extra_fields=extra_fields)
 
 
+# 표 헤더(품명/규격/수량/단가...)가 가로로 늘어선 일반적인 표가 아니라,
+# "개요/단가/수량/금액"처럼 필드명이 세로로 나열되고 그 옆에 값이 붙는 1개
+# 품목짜리 스펙시트 견적서(예: 혜일, 2026.09.02)를 위한 최후 폴백.
+_SPEC_SHEET_NAME_RE = re.compile(r"개\s*요\s+(.+)")
+_SPEC_SHEET_PRICE_RE = re.compile(r"단\s*가\s+(.+)")
+_SPEC_SHEET_QTY_RE = re.compile(r"수\s*량\s+(.+)")
+
+
+def _extract_single_item_from_spec_sheet(full_text):
+    """'개요/단가/수량'이 표 헤더가 아니라 세로 필드-값으로 나열된 견적서에서
+    품목 1개를 뽑아낸다. "개요" 줄(품명)이 없으면 이 폴백을 쓸 문서가 아니라고
+    보고 빈 리스트를 반환한다."""
+    name_m = _SPEC_SHEET_NAME_RE.search(full_text)
+    if not name_m:
+        return []
+    name = name_m.group(1).strip()
+    if not name:
+        return []
+    price_m = _SPEC_SHEET_PRICE_RE.search(full_text)
+    qty_m = _SPEC_SHEET_QTY_RE.search(full_text)
+    if not price_m and not qty_m:
+        return []
+    item = {"name": name}
+    if price_m:
+        price = P.parse_number(price_m.group(1))
+        if price is not None:
+            item["price"] = price
+    if qty_m:
+        qty = P.parse_number(qty_m.group(1))
+        if qty is not None:
+            item["qty"] = qty
+    return [item]
+
+
 def _read_pdf_quote(data_bytes, extra_fields=None):
     res = P.parse_pdf_items(data_bytes, extra_fields=extra_fields)
     items = res.get("items") or []
@@ -373,6 +407,12 @@ def _read_pdf_quote(data_bytes, extra_fields=None):
                         items = coord_items
                         source = "pdf-coords"
                         warnings = [w for w in warnings if "표를" not in w]
+                    else:
+                        spec_items = _extract_single_item_from_spec_sheet(full_text)
+                        if spec_items:
+                            items = spec_items
+                            source = "pdf-spec-sheet"
+                            warnings = [w for w in warnings if "표를" not in w]
                 else:
                     source = "pdf-ocr"
         except Exception:

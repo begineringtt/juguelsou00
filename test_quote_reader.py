@@ -76,6 +76,46 @@ class ReadImageQuoteCompanyOnlyTest(unittest.TestCase):
         self.assertEqual(result["company"], "테스트상사")
 
 
+class VerticalSpecSheetFallbackTest(unittest.TestCase):
+    def test_extracts_single_item_from_vertical_field_value_text(self):
+        # "개요/단가/수량/금액"이 표 헤더가 아니라 세로로 나열된 필드-값
+        # 형태인 실제 견적서(혜일, 2026.09.02) - 일반 표/좌표 폴백 둘 다 못 찾는
+        # 마지막 수단.
+        text = (
+            "개요 고정구삼각대세트(신형)\n"
+            "1 단 가 3,000 원\n"
+            "2 수 량 3,600세트\n"
+            "3\n"
+            "금 액 10,800,000 원 (VAT별도)"
+        )
+        items = quote_reader._extract_single_item_from_spec_sheet(text)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["name"], "고정구삼각대세트(신형)")
+        self.assertEqual(items[0]["price"], 3000)
+        self.assertEqual(items[0]["qty"], 3600)
+
+    def test_returns_empty_without_a_개요_line(self):
+        self.assertEqual(
+            quote_reader._extract_single_item_from_spec_sheet("아무 상관 없는 텍스트"), []
+        )
+
+
+HYEIL_SPEC_SHEET_QUOTE = (
+    r"D:\claude_personal\setting_03\북미\2026.09.02 혜일\2. 견적서_혜일_북미.pdf"
+)
+
+
+class RealSpecSheetQuoteTest(unittest.TestCase):
+    @unittest.skipUnless(os.path.isfile(HYEIL_SPEC_SHEET_QUOTE), "실제 세로형 스펙시트 샘플 없음")
+    def test_reads_the_real_vertical_spec_sheet_quote_end_to_end(self):
+        res = quote_reader.read_quote(path=HYEIL_SPEC_SHEET_QUOTE)
+        self.assertEqual(len(res["items"]), 1)
+        item = res["items"][0]
+        self.assertEqual(item["name"], "고정구삼각대세트(신형)")
+        self.assertEqual(item["price"], 3000)
+        self.assertEqual(item["qty"], 3600)
+
+
 class ReadImageQuoteItemsShapeTest(unittest.TestCase):
     def test_read_image_quote_returns_items_as_a_list_not_a_tuple(self):
         img = Image.new("RGB", (20, 20), "white")
