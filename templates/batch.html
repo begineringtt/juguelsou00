@@ -318,21 +318,32 @@ function applyAttachmentMatch(match) {
   });
 }
 
+// 자동으로 채워준 값(사용자가 직접 고친 게 아님)을 기억해둔다 - 그래야 다른
+// 견적서 파일로 다시 올렸을 때 이전 파일의 자동인식 값을 새 값으로 갱신할 수
+// 있다. 사용자가 직접 타이핑해서 값이 달라졌으면 덮어쓰지 않는다.
+let lastAutoFilledCompany = null;
+
 async function autofillCompanyFromQuote(file) {
   if (!file) return;
   showPickedFile(file, '업체명 인식 중…');
   resetAttachmentMatch();
   const companyInput = f.querySelector('input[name="company"]');
+  const canOverwrite = !companyInput.value.trim() || companyInput.value === lastAutoFilledCompany;
   try {
     const fd = new FormData();
     fd.append('quote', file);
     fd.append('setting03_root', f.querySelector('input[name="setting03_root"]').value);
     const res = await fetch('/batch_parse_quote', { method: 'POST', body: fd });
     const data = await res.json();
-    if (res.ok && data.company && !companyInput.value.trim()) {
+    if (res.ok && data.company && canOverwrite) {
       companyInput.value = data.company;
+      lastAutoFilledCompany = data.company;
       showPickedFile(file, '업체명 자동 인식: ' + data.company);
     } else if (res.ok && !data.company) {
+      if (canOverwrite) {
+        companyInput.value = '';
+        lastAutoFilledCompany = null;
+      }
       showPickedFile(file, '업체명을 자동으로 찾지 못했습니다 — 직접 입력해주세요.');
     } else {
       showPickedFile(file);
