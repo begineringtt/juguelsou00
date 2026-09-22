@@ -83,6 +83,9 @@
           <div>
             <label>업체명 *</label>
             <input type="text" name="company" placeholder="예: 유진철강산업㈜">
+            <div id="attachmentMatchPanel" style="display:none;margin-top:8px;font-size:12.5px;"></div>
+            <input type="hidden" name="attachment_company_override" id="attachmentOverrideInput" value="">
+            <input type="hidden" name="skip_auto_attachments" id="skipAutoAttachInput" value="">
           </div>
         </div>
       </div>
@@ -268,13 +271,62 @@ function showPickedFile(file, note) {
   quoteFilePicked.style.display = 'block';
 }
 
+// ---- setting_03 사업자등록증/통장사본 자동 매칭 확인 ----
+const attachmentMatchPanel = document.getElementById('attachmentMatchPanel');
+const attachmentOverrideInput = document.getElementById('attachmentOverrideInput');
+const skipAutoAttachInput = document.getElementById('skipAutoAttachInput');
+
+function resetAttachmentMatch() {
+  attachmentMatchPanel.style.display = 'none';
+  attachmentMatchPanel.innerHTML = '';
+  attachmentOverrideInput.value = '';
+  skipAutoAttachInput.value = '';
+}
+
+function applyAttachmentMatch(match) {
+  resetAttachmentMatch();
+  if (!match) return;
+  attachmentMatchPanel.style.display = 'block';
+  if (match.type === 'exact') {
+    attachmentMatchPanel.innerHTML =
+      `<span class="ok">✓ "${match.display}"의 사업자등록증/통장사본을 자동으로 찾아 첨부합니다.</span>`;
+    return;
+  }
+  const rows = match.candidates.map((c, i) => {
+    const docs = ['통장사본', '사업자등록증'].filter(d => c.has_docs[d]);
+    const docsText = docs.length ? docs.join(', ') + ' 있음' : '보유 문서 없음';
+    return `<label style="display:block;margin:4px 0;">
+      <input type="radio" name="attachmentCandidateChoice" value="${i}"> ${c.display} (${docsText})
+    </label>`;
+  }).join('');
+  attachmentMatchPanel.innerHTML = `
+    <div class="warn" style="margin-bottom:6px;">비슷한 이름의 업체를 찾았어요 — 맞는 곳을 골라주세요.</div>
+    ${rows}
+    <label style="display:block;margin:4px 0;">
+      <input type="radio" name="attachmentCandidateChoice" value="none"> 해당 없음 — 직접 업로드할게요
+    </label>`;
+  attachmentMatchPanel.querySelectorAll('input[name="attachmentCandidateChoice"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (radio.value === 'none') {
+        skipAutoAttachInput.value = '1';
+        attachmentOverrideInput.value = '';
+      } else {
+        skipAutoAttachInput.value = '';
+        attachmentOverrideInput.value = match.candidates[Number(radio.value)].display;
+      }
+    });
+  });
+}
+
 async function autofillCompanyFromQuote(file) {
   if (!file) return;
   showPickedFile(file, '업체명 인식 중…');
+  resetAttachmentMatch();
   const companyInput = f.querySelector('input[name="company"]');
   try {
     const fd = new FormData();
     fd.append('quote', file);
+    fd.append('setting03_root', f.querySelector('input[name="setting03_root"]').value);
     const res = await fetch('/batch_parse_quote', { method: 'POST', body: fd });
     const data = await res.json();
     if (res.ok && data.company && !companyInput.value.trim()) {
@@ -285,6 +337,7 @@ async function autofillCompanyFromQuote(file) {
     } else {
       showPickedFile(file);
     }
+    if (res.ok) applyAttachmentMatch(data.attachment_match);
   } catch (e) {
     showPickedFile(file);
   }

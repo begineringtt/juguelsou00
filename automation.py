@@ -46,6 +46,7 @@ def run(quote_path, category, company, setting03_root, *,
         attachments=None, product=None, place=True, update_checklist=True,
         write_report=True, extra_docs_done=None,
         auto_find_attachments=True, find_doc_types=("통장사본", "사업자등록증"),
+        attachment_company_override=None,
         **pipeline_opts):
     """전체 자동화 1건 실행.
 
@@ -53,7 +54,12 @@ def run(quote_path, category, company, setting03_root, *,
     반환한다(미리보기/드라이런 용).
 
     auto_find_attachments=True 이면, 직접 넘기지 않은 통장사본·사업자등록증을
-    setting_03 기존 폴더("서버")에서 업체명으로 찾아 자동 복사한다.
+    setting_03 기존 폴더("서버")에서 업체명으로 찾아 자동 복사한다 - 단, 정확히
+    일치하는 업체일 때만이다.
+
+    attachment_company_override: 배치 화면에서 "유사 업체" 후보를 사용자가
+    확정했을 때, 그 확정된 업체명. 주어지면 company 대신 이 이름으로 첨부를
+    찾는다(company는 문서 내용/폴더명에 그대로 쓰이고, 첨부 조회에만 영향).
     """
     category_root = folder_router.category_root(setting03_root, category)
     siblings = _list_siblings(category_root)
@@ -64,7 +70,7 @@ def run(quote_path, category, company, setting03_root, *,
     if auto_find_attachments:
         index = attachment_finder.build_index(setting03_root)
         found, matched_display = attachment_finder.find_documents(
-            index, company, doc_types=find_doc_types)
+            index, attachment_company_override or company, doc_types=find_doc_types)
         for doc_type, path in found.items():
             if path and doc_type not in attachments:
                 attachments[doc_type] = path

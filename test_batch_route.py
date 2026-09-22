@@ -24,6 +24,13 @@ class BatchRouteTest(unittest.TestCase):
         r = self.client.get("/batch")
         self.assertEqual(r.status_code, 200)
 
+    def test_batch_page_includes_attachment_match_panel(self):
+        r = self.client.get("/batch")
+        html = r.get_data(as_text=True)
+        self.assertIn('id="attachmentMatchPanel"', html)
+        self.assertIn('name="attachment_company_override"', html)
+        self.assertIn('name="skip_auto_attachments"', html)
+
     def test_missing_fields_rejected(self):
         r = self.client.post("/batch_run", data={}, content_type="multipart/form-data")
         self.assertEqual(r.status_code, 400)
@@ -50,6 +57,100 @@ class BatchRouteTest(unittest.TestCase):
     def test_parse_quote_route_rejects_missing_file(self):
         r = self.client.post("/batch_parse_quote", data={}, content_type="multipart/form-data")
         self.assertEqual(r.status_code, 400)
+
+    def test_parse_quote_route_reports_exact_attachment_match(self):
+        import openpyxl
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            setting03_root = os.path.join(tmp_dir, "setting_03")
+            repo_dir = os.path.join(setting03_root, "고온성", "가나다전자")
+            os.makedirs(repo_dir)
+            open(os.path.join(repo_dir, "통장사본.jpg"), "w").close()
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws["A1"] = "공급자: 가나다전자㈜"
+            ws.append(["품명", "수량", "단가"])
+            ws.append(["테스트자재", 2, 1000])
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+
+            r = self.client.post(
+                "/batch_parse_quote",
+                data={"quote": (buf, "견적서.xlsx"), "setting03_root": setting03_root},
+                content_type="multipart/form-data",
+            )
+            self.assertEqual(r.status_code, 200)
+            j = r.get_json()
+            self.assertEqual(j["attachment_match"]["type"], "exact")
+            self.assertEqual(j["attachment_match"]["display"], "가나다전자")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_parse_quote_route_reports_fuzzy_attachment_candidates(self):
+        import openpyxl
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            setting03_root = os.path.join(tmp_dir, "setting_03")
+            repo_dir = os.path.join(setting03_root, "고온성", "가나다전자부품")
+            os.makedirs(repo_dir)
+            open(os.path.join(repo_dir, "통장사본.jpg"), "w").close()
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws["A1"] = "공급자: 가나다전자㈜"
+            ws.append(["품명", "수량", "단가"])
+            ws.append(["테스트자재", 2, 1000])
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+
+            r = self.client.post(
+                "/batch_parse_quote",
+                data={"quote": (buf, "견적서.xlsx"), "setting03_root": setting03_root},
+                content_type="multipart/form-data",
+            )
+            self.assertEqual(r.status_code, 200)
+            j = r.get_json()
+            self.assertEqual(j["attachment_match"]["type"], "fuzzy")
+            candidates = j["attachment_match"]["candidates"]
+            self.assertEqual(len(candidates), 1)
+            self.assertEqual(candidates[0]["display"], "가나다전자부품")
+            self.assertTrue(candidates[0]["has_docs"]["통장사본"])
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_batch_run_uses_confirmed_attachment_override(self):
+        import openpyxl
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            setting03_root = os.path.join(tmp_dir, "setting_03")
+            os.makedirs(os.path.join(setting03_root, "고온성"))
+            repo_dir = os.path.join(setting03_root, "고온성", "대한중공업")
+            os.makedirs(repo_dir)
+            open(os.path.join(repo_dir, "통장사본.jpg"), "w").close()
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.append(["품명", "수량", "단가"])
+            ws.append(["테스트자재", 2, 1000])
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+
+            data = {
+                "setting03_root": setting03_root, "category": "고온성", "company": "대한",
+                "quote": (buf, "견적서.xlsx"),
+                "attachment_company_override": "대한중공업",
+                "dry_run": "1",
+            }
+            r = self.client.post("/batch_run", data=data, content_type="multipart/form-data")
+            self.assertEqual(r.status_code, 200)
+            j = r.get_json()
+            self.assertIn("통장사본", j["attachments_from_repo"])
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def test_batch_page_lists_user_saved_projects_not_fixed_categories(self):
         tmp_dir = tempfile.mkdtemp()

@@ -185,6 +185,37 @@ class AttachmentFinderTest(unittest.TestCase):
         self.assertIsNone(docs3["통장사본"])
         self.assertIsNone(disp3)
 
+    def test_find_documents_does_not_auto_attach_on_fuzzy_match(self):
+        # 핵심어가 완전히 같지 않고 부분 포함 관계뿐인 "유사" 매칭은, 잘못된
+        # 업체의 사업자등록증/통장사본이 조용히 붙는 사고를 막기 위해 사용자
+        # 확인 없이는 자동 첨부하지 않는다.
+        import tempfile
+        root = tempfile.mkdtemp(prefix="repo_")
+        self._make_repo(root)
+        idx = attachment_finder.build_index(root)
+        docs, disp = attachment_finder.find_documents(idx, "유진철강기계")
+        self.assertIsNone(docs["통장사본"])
+        self.assertIsNone(disp)
+
+    def test_find_fuzzy_candidates_lists_similar_companies_with_doc_availability(self):
+        import tempfile
+        root = tempfile.mkdtemp(prefix="repo_")
+        self._make_repo(root)
+        idx = attachment_finder.build_index(root)
+        candidates = attachment_finder.find_fuzzy_candidates(idx, "유진철강기계")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["display"], "유진철강")
+        self.assertTrue(candidates[0]["has_docs"]["통장사본"])
+        self.assertTrue(candidates[0]["has_docs"]["사업자등록증"])
+
+    def test_find_fuzzy_candidates_is_empty_when_an_exact_match_exists(self):
+        import tempfile
+        root = tempfile.mkdtemp(prefix="repo_")
+        self._make_repo(root)
+        idx = attachment_finder.build_index(root)
+        candidates = attachment_finder.find_fuzzy_candidates(idx, "유진철강산업㈜")
+        self.assertEqual(candidates, [])
+
 
 # ---- 실제 샘플이 있을 때만 도는 파서 정확도 테스트 ----
 SAMPLE = "/mnt/user-data/uploads/setting_03/고효율 광원/2026-09-20 유진철강/견적서.pdf"

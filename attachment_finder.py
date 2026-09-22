@@ -105,19 +105,50 @@ def build_index(setting03_root, categories=None):
 
 
 def match_company(index, company):
-    """업체명을 색인 키에 매칭. (core_key 반환, 없으면 None)"""
+    """업체명을 색인 키에 정확히(core_token 완전 일치) 매칭. 없으면 None.
+
+    부분 일치("유사")는 잘못된 업체의 사업자등록증/통장사본이 조용히 붙는
+    사고로 이어질 수 있어 여기서는 쓰지 않는다 - find_fuzzy_candidates()로
+    후보를 뽑아 사용자 확인을 받은 뒤에만 쓴다.
+    """
     key = core_token(company)
-    if key in index:
+    if key and key in index:
         return key
-    # 부분 일치(양방향)
-    for k in index:
-        if key and (key in k or k in key) and min(len(key), len(k)) >= 2:
-            return k
     return None
+
+
+def _is_fuzzy_partial(key_a, key_b):
+    return bool(key_a) and bool(key_b) and (key_a in key_b or key_b in key_a) and min(len(key_a), len(key_b)) >= 2
+
+
+def find_fuzzy_candidates(index, company):
+    """정확히 일치하는 업체가 없을 때, 부분 포함 관계인 후보들을 찾는다.
+    (정확 매칭이 있으면 애초에 확인이 필요 없으므로 빈 리스트를 반환한다.)
+
+    반환: [{"key", "display", "has_docs": {문서종류: bool, ...}}, ...]
+          이름 길이 차이가 적은(더 비슷한) 순으로 정렬.
+    """
+    key = core_token(company)
+    if not key or key in index:
+        return []
+    candidate_keys = [k for k in index if _is_fuzzy_partial(key, k)]
+    candidate_keys.sort(key=lambda k: abs(len(k) - len(key)))
+    return [
+        {
+            "key": k,
+            "display": index[k]["display"],
+            "has_docs": {d: bool(index[k]["docs"].get(d)) for d in ("통장사본", "사업자등록증")},
+        }
+        for k in candidate_keys
+    ]
 
 
 def find_documents(index, company, doc_types=("통장사본", "사업자등록증"), prefer="newest"):
     """업체의 지정 문서들을 색인에서 찾아 각 종류별 대표 파일 경로를 반환.
+
+    정확히 일치하는 업체일 때만 채운다(유사 매칭은 find_fuzzy_candidates()로
+    후보를 보여주고 사용자가 확정한 뒤에만 이 함수에 그 확정된 이름을 넘겨야
+    한다).
 
     반환: { 문서종류: path or None }, 그리고 매칭된 업체 표시명.
     """

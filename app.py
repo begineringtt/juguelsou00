@@ -6,6 +6,7 @@ import webbrowser
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 
+import attachment_finder
 import automation
 import column_settings
 import history_store
@@ -249,6 +250,25 @@ def batch_page():
     )
 
 
+def _attachment_match_for(company, setting03_root):
+    """업체명으로 setting_03 색인을 찾아 정확/유사 매칭 정보를 만든다.
+    (배치 화면에서 업체명 자동인식 직후, 사업자등록증/통장사본을 조용히
+    잘못 붙이지 않도록 정확 매칭이 아니면 후보만 보여주고 확인을 받는다.)
+
+    반환: {"type": "exact", "display": ...} | {"type": "fuzzy", "candidates": [...]} | None
+    """
+    if not company or not os.path.isdir(setting03_root):
+        return None
+    index = attachment_finder.build_index(setting03_root)
+    exact_key = attachment_finder.match_company(index, company)
+    if exact_key:
+        return {"type": "exact", "display": index[exact_key]["display"]}
+    candidates = attachment_finder.find_fuzzy_candidates(index, company)
+    if candidates:
+        return {"type": "fuzzy", "candidates": candidates}
+    return None
+
+
 @app.route("/batch_parse_quote", methods=["POST"])
 def batch_parse_quote():
     file = request.files.get("quote")
@@ -259,10 +279,13 @@ def batch_parse_quote():
         result = quote_reader.read_quote(data_bytes=file.read(), ext=ext, company_only=True)
     except Exception:
         return jsonify({"error": "견적서를 읽을 수 없습니다."}), 400
+    setting03_root = request.form.get("setting03_root", "").strip() \
+        or _load_config().get("setting03_root", "") or DEFAULT_SETTING03
     return jsonify({
         "company": result.get("company"),
         "title": result.get("title"),
         "warnings": result.get("warnings", []),
+        "attachment_match": _attachment_match_for(result.get("company"), setting03_root),
     })
 
 
@@ -313,6 +336,8 @@ def batch_run():
             product=form.get("product", "").strip() or None,
             attachments=attachments,
             place=(form.get("dry_run") != "1"),
+            auto_find_attachments=(form.get("skip_auto_attachments") != "1"),
+            attachment_company_override=form.get("attachment_company_override", "").strip() or None,
         )
     except Exception as e:
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
