@@ -23,16 +23,21 @@ DEFAULT_DETAIL = "해당 연구개발 과제 수행을 위한 자재를 구매 �
 
 
 def project_for_category(category):
-    """카테고리에 해당하는 (중앙행정기관, 전문기관, 과제명) 프리셋을 찾는다."""
+    """카테고리에 해당하는 (중앙행정기관, 전문기관, 과제명) 프리셋을 찾는다.
+
+    사용자가 index.html/배치 화면에서 직접 추가·수정한 과제(history_store에 저장된
+    실제 목록)를 우선 보고, 없으면 내장 기본값으로 재시도한다.
+    """
     label_target = folder_router.folder_for_category(category)
-    # history_store 의 short_label 로 매칭
-    for p in history_store.DEFAULT_PROJECTS:
-        lbl = history_store.short_label(p["project_name"])
+    projects = history_store.load_projects()
+    # 사용자가 지정한 축약명(effective_label)으로 매칭
+    for p in projects:
+        lbl = history_store.effective_label(p)
         if lbl in (category, "중동(IR)" if category in ("중동", "IR") else category):
             return p
     # 카테고리 키워드가 과제명에 들어 있는지로 재시도
     key = {"고효율 광원": "고효율", "IR": "중동", "수확후": "수확", "자동화": "인건비"}.get(label_target, category)
-    for p in history_store.DEFAULT_PROJECTS:
+    for p in projects:
         if key and key in p["project_name"]:
             return p
     return {"agency": "", "org": "", "project_name": ""}

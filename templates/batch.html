@@ -14,6 +14,9 @@
     p.sub { color:#5b6673; margin:0 0 20px; font-size: 13px; }
     .card { background:#fff; border:1px solid var(--line); border-radius:12px;
             padding:18px; margin-bottom:16px; }
+    .card.dropzone.drag-over { border:2px dashed var(--brand); background:#f0f7f3; }
+    .drop-hint { font-size:12px; color:#7a8590; margin-top:6px; }
+    .file-picked { font-size:12.5px; color:#5b6673; margin-top:6px; display:none; }
     label { display:block; font-size:13px; font-weight:600; margin:12px 0 4px; }
     input[type=text], input[type=date], select, input[type=file] {
       width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px;
@@ -50,10 +53,32 @@
         <div class="row">
           <div>
             <label>과제 카테고리 *</label>
-            <select name="category">
-              {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+            <select name="category" id="categorySelect">
+              {% for p in projects %}<option value="{{ p.label }}">{{ p.label }}</option>{% endfor %}
             </select>
-            <div class="hint">‘중동’은 자동으로 IR 폴더에 정리됩니다.</div>
+            <div class="hint">‘중동’은 자동으로 IR 폴더에 정리됩니다. 지출결의서 단독 생성
+              화면(‘과제 정보’)에서 추가/수정한 과제가 여기에도 그대로 나타납니다.</div>
+            <div class="actions" style="margin-top:8px;">
+              <button type="button" class="secondary" id="toggleAddProjectBtn">+ 새 과제 추가</button>
+              <button type="button" class="secondary" id="editProjectBtn">수정</button>
+              <button type="button" class="secondary" id="deleteProjectBtn">삭제</button>
+            </div>
+            <div id="addProjectPanel" style="display:none; margin-top:10px; padding:12px; border:1px dashed var(--line); border-radius:8px;">
+              <div style="font-weight:600; font-size:12.5px; margin-bottom:8px;" id="addProjectPanelTitle">새 과제 추가</div>
+              <div class="row">
+                <div><label>축약명 (드롭다운 표시용, 비우면 자동 인식)</label><input type="text" id="newProjectLabel" placeholder="예: 근권부"></div>
+                <div><label>중앙행정기관</label><input type="text" id="newProjectAgency" placeholder="예: 농림축산식품부"></div>
+              </div>
+              <div class="row" style="margin-top:8px;">
+                <div><label>전문기관</label><input type="text" id="newProjectOrg" placeholder="예: 농림식품기술기획평가원"></div>
+                <div><label>과제명 (필수)</label><input type="text" id="newProjectName" placeholder="예: 새 과제명 전체를 입력"></div>
+              </div>
+              <div class="actions" style="margin-top:10px;">
+                <button type="button" id="saveNewProjectBtn">저장</button>
+                <button type="button" class="secondary" id="cancelNewProjectBtn">취소</button>
+              </div>
+              <div id="newProjectMsg" style="font-size:12px;margin-top:6px;"></div>
+            </div>
           </div>
           <div>
             <label>업체명 *</label>
@@ -62,9 +87,11 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card dropzone" id="quoteDropzone">
         <label>견적서 파일 * (PDF / JPG / PNG / XLSX)</label>
-        <input type="file" name="quote" accept=".pdf,.jpg,.jpeg,.png,.xlsx">
+        <input type="file" name="quote" id="quoteFileInput" accept=".pdf,.jpg,.jpeg,.png,.xlsx">
+        <div class="drop-hint">이 카드 안 아무 곳에나 파일을 끌어다 놓아도 됩니다.</div>
+        <div class="file-picked" id="quoteFilePicked"></div>
         <div class="row">
           <div><label>검수자 성명</label><input type="text" name="inspector" placeholder="예: 유찬희 책임연구원"></div>
           <div><label>검수일</label><input type="date" name="inspect_date"></div>
@@ -104,6 +131,187 @@
 const f = document.getElementById('f');
 const resultCard = document.getElementById('resultCard');
 const result = document.getElementById('result');
+
+// ---- 과제 카테고리 (지출결의서 단독 화면과 동일한 데이터를 공유) ----
+let PROJECTS = {{ projects | tojson }};
+const categorySelect = document.getElementById('categorySelect');
+const addProjectPanel = document.getElementById('addProjectPanel');
+let editingOriginalName = null;
+
+function refreshCategoryOptions(selectLabel) {
+  categorySelect.innerHTML = '';
+  PROJECTS.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.label;
+    opt.textContent = p.label;
+    categorySelect.appendChild(opt);
+  });
+  if (selectLabel) categorySelect.value = selectLabel;
+}
+
+function selectedProject() {
+  return PROJECTS.find(p => p.label === categorySelect.value) || null;
+}
+
+function clearNewProjectFields() {
+  document.getElementById('newProjectLabel').value = '';
+  document.getElementById('newProjectAgency').value = '';
+  document.getElementById('newProjectOrg').value = '';
+  document.getElementById('newProjectName').value = '';
+}
+
+function openAddProjectPanel() {
+  editingOriginalName = null;
+  document.getElementById('addProjectPanelTitle').textContent = '새 과제 추가';
+  document.getElementById('saveNewProjectBtn').textContent = '저장';
+  clearNewProjectFields();
+  document.getElementById('newProjectMsg').textContent = '';
+  addProjectPanel.style.display = 'block';
+}
+
+function closeAddProjectPanel() {
+  addProjectPanel.style.display = 'none';
+  document.getElementById('newProjectMsg').textContent = '';
+  editingOriginalName = null;
+}
+
+document.getElementById('toggleAddProjectBtn').addEventListener('click', () => {
+  if (addProjectPanel.style.display !== 'none' && editingOriginalName === null) {
+    closeAddProjectPanel();
+  } else {
+    openAddProjectPanel();
+  }
+});
+
+document.getElementById('editProjectBtn').addEventListener('click', () => {
+  const p = selectedProject();
+  if (!p) { alert('먼저 수정할 과제를 선택해주세요.'); return; }
+  editingOriginalName = p.project_name;
+  document.getElementById('addProjectPanelTitle').textContent = '과제 수정';
+  document.getElementById('saveNewProjectBtn').textContent = '수정 저장';
+  document.getElementById('newProjectLabel').value = p.label || '';
+  document.getElementById('newProjectAgency').value = p.agency || '';
+  document.getElementById('newProjectOrg').value = p.org || '';
+  document.getElementById('newProjectName').value = p.project_name || '';
+  document.getElementById('newProjectMsg').textContent = '';
+  addProjectPanel.style.display = 'block';
+});
+
+document.getElementById('deleteProjectBtn').addEventListener('click', async () => {
+  const p = selectedProject();
+  if (!p) { alert('먼저 삭제할 과제를 선택해주세요.'); return; }
+  if (!confirm(`"${p.label}" 과제를 목록에서 삭제할까요?`)) return;
+  const fd = new FormData();
+  fd.append('project_name', p.project_name);
+  try {
+    const res = await fetch('/delete_project', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || '삭제에 실패했습니다.'); return; }
+    PROJECTS = PROJECTS.filter(x => x.project_name !== p.project_name);
+    refreshCategoryOptions();
+    if (editingOriginalName === p.project_name) closeAddProjectPanel();
+  } catch (err) {
+    alert('삭제 중 오류가 발생했습니다.');
+  }
+});
+
+document.getElementById('cancelNewProjectBtn').addEventListener('click', closeAddProjectPanel);
+
+document.getElementById('saveNewProjectBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('newProjectMsg');
+  const projectName = document.getElementById('newProjectName').value.trim();
+  if (!projectName) {
+    msg.style.color = '#c0392b';
+    msg.textContent = '과제명을 입력해주세요.';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('label', document.getElementById('newProjectLabel').value.trim());
+  fd.append('agency', document.getElementById('newProjectAgency').value.trim());
+  fd.append('org', document.getElementById('newProjectOrg').value.trim());
+  fd.append('project_name', projectName);
+  const isEdit = editingOriginalName !== null;
+  if (isEdit) fd.append('original_name', editingOriginalName);
+
+  try {
+    const res = await fetch(isEdit ? '/update_project' : '/add_project', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.style.color = '#c0392b';
+      msg.textContent = data.error || (isEdit ? '수정에 실패했습니다.' : '추가에 실패했습니다.');
+      return;
+    }
+    if (isEdit) PROJECTS = PROJECTS.filter(p => p.project_name !== editingOriginalName);
+    PROJECTS = PROJECTS.filter(p => p.label !== data.label);
+    PROJECTS.unshift(data);
+    refreshCategoryOptions(data.label);
+    msg.style.color = '#1b7f2b';
+    msg.textContent = isEdit ? '수정되었습니다.' : '추가되었습니다.';
+    closeAddProjectPanel();
+  } catch (err) {
+    msg.style.color = '#c0392b';
+    msg.textContent = '처리 중 오류가 발생했습니다.';
+  }
+});
+
+// ---- 견적서 드래그 앤 드롭 ----
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+const quoteDropzone = document.getElementById('quoteDropzone');
+const quoteFileInput = document.getElementById('quoteFileInput');
+const quoteFilePicked = document.getElementById('quoteFilePicked');
+const QUOTE_EXTS = ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx'];
+
+function showPickedFile(file, note) {
+  if (!file) { quoteFilePicked.style.display = 'none'; return; }
+  quoteFilePicked.textContent = '선택된 파일: ' + file.name + (note ? ' — ' + note : '');
+  quoteFilePicked.style.display = 'block';
+}
+
+async function autofillCompanyFromQuote(file) {
+  if (!file) return;
+  showPickedFile(file, '업체명 인식 중…');
+  const companyInput = f.querySelector('input[name="company"]');
+  try {
+    const fd = new FormData();
+    fd.append('quote', file);
+    const res = await fetch('/batch_parse_quote', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (res.ok && data.company && !companyInput.value.trim()) {
+      companyInput.value = data.company;
+      showPickedFile(file, '업체명 자동 인식: ' + data.company);
+    } else if (res.ok && !data.company) {
+      showPickedFile(file, '업체명을 자동으로 찾지 못했습니다 — 직접 입력해주세요.');
+    } else {
+      showPickedFile(file);
+    }
+  } catch (e) {
+    showPickedFile(file);
+  }
+}
+
+quoteFileInput.addEventListener('change', () => autofillCompanyFromQuote(quoteFileInput.files[0]));
+
+['dragenter', 'dragover'].forEach(evt => {
+  quoteDropzone.addEventListener(evt, (e) => {
+    e.preventDefault();
+    quoteDropzone.classList.add('drag-over');
+  });
+});
+['dragleave', 'dragend'].forEach(evt => {
+  quoteDropzone.addEventListener(evt, () => quoteDropzone.classList.remove('drag-over'));
+});
+quoteDropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  quoteDropzone.classList.remove('drag-over');
+  const file = [...(e.dataTransfer?.files || [])].find(f =>
+    QUOTE_EXTS.some(ext => f.name.toLowerCase().endsWith(ext)));
+  if (!file) return;
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  quoteFileInput.files = dt.files;
+  autofillCompanyFromQuote(file);
+});
 
 async function run(dry) {
   const fd = new FormData(f);

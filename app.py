@@ -8,8 +8,8 @@ from flask import Flask, jsonify, redirect, render_template, request, send_file,
 
 import automation
 import column_settings
-import folder_router
 import history_store
+import quote_reader
 import read_seed
 from generator import build_expense_report, suggest_filename
 from paths import app_dir
@@ -239,11 +239,31 @@ DEFAULT_SETTING03 = r"D:\claude_personal\setting_03"
 @app.route("/batch", methods=["GET"])
 def batch_page():
     cfg = _load_config()
+    projects = history_store.load_projects()
+    for p in projects:
+        p["label"] = history_store.effective_label(p)
     return render_template(
         "batch.html",
-        categories=folder_router.CATEGORY_CHOICES,
+        projects=projects,
         setting03_root=cfg.get("setting03_root", "") or DEFAULT_SETTING03,
     )
+
+
+@app.route("/batch_parse_quote", methods=["POST"])
+def batch_parse_quote():
+    file = request.files.get("quote")
+    if not file or not file.filename:
+        return jsonify({"error": "파일이 없습니다."}), 400
+    ext = os.path.splitext(file.filename)[1]
+    try:
+        result = quote_reader.read_quote(data_bytes=file.read(), ext=ext)
+    except Exception:
+        return jsonify({"error": "견적서를 읽을 수 없습니다."}), 400
+    return jsonify({
+        "company": result.get("company"),
+        "title": result.get("title"),
+        "warnings": result.get("warnings", []),
+    })
 
 
 def _save_upload(file_storage):

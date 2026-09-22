@@ -3,6 +3,7 @@ __pycache__/
 data/history.json
 data/projects.json
 data/column_settings.json
+data/app_config.json
 build/
 dist/
 output/
