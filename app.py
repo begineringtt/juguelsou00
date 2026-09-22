@@ -338,9 +338,15 @@ def batch_run():
     })
 
 
+def _startup_path():
+    # 실행.bat / 견적서자동정리_실행.bat 이 둘 다 그냥 python app.py 만 실행하기
+    # 때문에, 어느 화면을 열지는 각 .bat이 미리 심어둔 GP_OPEN_PAGE 환경변수로
+    # 구분한다. 기본(설정 없음)은 지출결의서 단독 생성 화면(/).
+    return "/batch" if os.environ.get("GP_OPEN_PAGE") == "batch" else "/"
+
+
 def _open_browser():
-    # 기본 화면을 '견적서 자동 정리(/batch)'로 연다.
-    webbrowser.open("http://127.0.0.1:5000/batch")
+    webbrowser.open(f"http://127.0.0.1:5000{_startup_path()}")
 
 
 if __name__ == "__main__":
