@@ -349,6 +349,11 @@ def _open_browser():
     webbrowser.open(f"http://127.0.0.1:5000{_startup_path()}")
 
 
+# threaded=True: 견적서 사진 OCR처럼 느린 요청 하나가 처리되는 동안에도(단일
+# 스레드였을 때는 그 사이 다른 화면의 모든 요청이 막혀 "Failed to fetch"가
+# 났었다) 다른 요청을 동시에 처리할 수 있어야 한다.
+_RUN_KWARGS = dict(host="127.0.0.1", port=5000, debug=False, threaded=True)
+
 if __name__ == "__main__":
     threading.Timer(1.0, _open_browser).start()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(**_RUN_KWARGS)
