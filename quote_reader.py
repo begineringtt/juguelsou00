@@ -327,10 +327,15 @@ def _guess_company_from_grid_all(wb):
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
 
-def read_quote(path=None, data_bytes=None, ext=None, extra_fields=None):
+def read_quote(path=None, data_bytes=None, ext=None, extra_fields=None, company_only=False):
     """견적서 파일을 읽어 통합 스키마 dict 를 반환한다.
 
     path 또는 (data_bytes+ext) 중 하나를 준다.
+
+    company_only=True 이면(예: 배치 화면의 "업체명 자동 인식" 미리보기) 품목 표
+    OCR처럼 비용이 큰 경로는 건너뛰고 company/title만 뽑는다 - 사진 한 장의 품목
+    표 OCR은 셀마다 별도 Tesseract 프로세스를 띄워서 몇 분씩 걸릴 수 있는데,
+    company/title 미리보기에는 그 결과가 쓰이지 않는다.
     """
     if data_bytes is None:
         with open(path, "rb") as f:
@@ -343,7 +348,7 @@ def read_quote(path=None, data_bytes=None, ext=None, extra_fields=None):
         return _read_xlsx_quote(data_bytes, extra_fields=extra_fields)
 
     if ext in _IMAGE_EXTS:
-        return _read_image_quote(data_bytes, extra_fields=extra_fields)
+        return _read_image_quote(data_bytes, extra_fields=extra_fields, company_only=company_only)
 
     # 기본: PDF
     return _read_pdf_quote(data_bytes, extra_fields=extra_fields)
@@ -381,7 +386,7 @@ def _read_pdf_quote(data_bytes, extra_fields=None):
     }
 
 
-def _read_image_quote(data_bytes, extra_fields=None):
+def _read_image_quote(data_bytes, extra_fields=None, company_only=False):
     from PIL import Image
     synonyms = None
     if extra_fields:
@@ -393,12 +398,15 @@ def _read_image_quote(data_bytes, extra_fields=None):
     # 이진화->deskew->노이즈제거 전처리를 거친 이미지로 OCR한다.
     img = P._preprocess_for_ocr(P.fix_image_orientation(img))
     warnings = ["이미지(JPG/PNG) 견적서는 OCR로 인식했습니다. 인식 결과를 원본과 꼭 대조해주세요."]
-    try:
-        items, _mapping = P.ocr_extract_items(img, synonyms=synonyms)
-        items = items or []
-    except Exception as e:
+    if company_only:
         items = []
-        warnings.append(f"OCR 품목 인식에 실패했습니다: {type(e).__name__}")
+    else:
+        try:
+            items, _mapping = P.ocr_extract_items(img, synonyms=synonyms)
+            items = items or []
+        except Exception as e:
+            items = []
+            warnings.append(f"OCR 품목 인식에 실패했습니다: {type(e).__name__}")
     company = None
     try:
         text = P.ocr_page_text(img)

@@ -55,6 +55,27 @@ class ReadImageQuotePreprocessingTest(unittest.TestCase):
         self.assertIs(items_spy.call_args.args[0], sentinel)
 
 
+class ReadImageQuoteCompanyOnlyTest(unittest.TestCase):
+    def test_company_only_skips_the_expensive_item_table_ocr(self):
+        # ocr_extract_items()는 표 셀마다 별도 Tesseract 프로세스를 띄워서 큰
+        # 사진에서는 몇 분씩 걸릴 수 있다. 배치 화면의 "업체명 자동 인식" 미리보기는
+        # company/title만 쓰므로, company_only=True일 때는 이 비싼 경로를 아예
+        # 타지 않아야 한다.
+        img = Image.new("RGB", (20, 20), "white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+
+        with mock.patch.object(quote_reader.P, "ocr_extract_items") as items_spy, \
+             mock.patch.object(quote_reader.P, "ocr_page_text", return_value="상호: 테스트상사"):
+            result = quote_reader.read_quote(
+                data_bytes=buf.getvalue(), ext=".png", company_only=True
+            )
+
+        items_spy.assert_not_called()
+        self.assertEqual(result["items"], [])
+        self.assertEqual(result["company"], "테스트상사")
+
+
 class ReadImageQuoteItemsShapeTest(unittest.TestCase):
     def test_read_image_quote_returns_items_as_a_list_not_a_tuple(self):
         img = Image.new("RGB", (20, 20), "white")

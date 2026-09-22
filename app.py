@@ -256,7 +256,7 @@ def batch_parse_quote():
         return jsonify({"error": "파일이 없습니다."}), 400
     ext = os.path.splitext(file.filename)[1]
     try:
-        result = quote_reader.read_quote(data_bytes=file.read(), ext=ext)
+        result = quote_reader.read_quote(data_bytes=file.read(), ext=ext, company_only=True)
     except Exception:
         return jsonify({"error": "견적서를 읽을 수 없습니다."}), 400
     return jsonify({
