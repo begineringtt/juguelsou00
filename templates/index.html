@@ -142,10 +142,12 @@
     border-radius: 50%; animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  a.top { display: inline-block; margin-bottom: 8px; font-size: 13px; color: var(--accent); text-decoration: none; }
 </style>
 </head>
 <body>
 <div class="card">
+  <a class="top" href="/batch">견적서 → 지출결의서·검수확인서 자동 정리 화면 →</a>
   <h1>지출결의서 자동 생성기</h1>
   <p class="sub">아래 내용을 입력하고 '엑셀 파일 생성' 버튼을 누르면, 회사 양식(지출결의서) 그대로 채워진 .xlsx 파일이 다운로드됩니다. 한 번 사용한 값은 자동으로 기억되어 다음에 드롭다운으로 다시 고를 수 있습니다.</p>
 
