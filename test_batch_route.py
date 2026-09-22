@@ -124,7 +124,12 @@ class BatchRouteTest(unittest.TestCase):
     def test_batch_run_uses_confirmed_attachment_override(self):
         import openpyxl
         tmp_dir = tempfile.mkdtemp()
+        original_config_path = appmod._CONFIG_PATH
         try:
+            # /batch_run은 "다음 실행 때 자동으로 채워주려고" setting03_root를
+            # 앱 설정 파일에 저장한다 - 격리 안 하면 이 테스트가 실사용자의
+            # 진짜 설정 파일을 임시 경로로 덮어써버린다.
+            appmod._CONFIG_PATH = os.path.join(tmp_dir, "app_config.json")
             setting03_root = os.path.join(tmp_dir, "setting_03")
             os.makedirs(os.path.join(setting03_root, "고온성"))
             repo_dir = os.path.join(setting03_root, "고온성", "대한중공업")
@@ -150,6 +155,7 @@ class BatchRouteTest(unittest.TestCase):
             j = r.get_json()
             self.assertIn("통장사본", j["attachments_from_repo"])
         finally:
+            appmod._CONFIG_PATH = original_config_path
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def test_batch_page_lists_user_saved_projects_not_fixed_categories(self):
@@ -173,23 +179,28 @@ class BatchRouteTest(unittest.TestCase):
                          "실제 샘플/체크리스트 없음")
     def test_full_run_places_files(self):
         root = tempfile.mkdtemp(prefix="sb_route_")
-        os.makedirs(os.path.join(root, "체크리스트"))
-        os.makedirs(os.path.join(root, "고효율 광원", "2026-09-20 유진철강"))
-        shutil.copy2(CHECKLIST, os.path.join(root, "체크리스트"))
-        with open(SAMPLE, "rb") as fh:
-            qbytes = fh.read()
-        data = {
-            "setting03_root": root, "category": "고효율", "company": "유진철강산업㈜",
-            "inspector": "유찬희 책임연구원", "inspect_date": "2026-09-20",
-            "quote": (io.BytesIO(qbytes), "견적서.pdf"),
-        }
-        r = self.client.post("/batch_run", data=data, content_type="multipart/form-data")
-        self.assertEqual(r.status_code, 200)
-        j = r.get_json()
-        self.assertEqual(j["item_count"], 1)
-        self.assertEqual(j["total_supply"], 5043168)
-        self.assertGreaterEqual(len(j["placed_files"]), 3)
-        self.assertEqual(j["checklist"]["misses"], [])
+        original_config_path = appmod._CONFIG_PATH
+        try:
+            appmod._CONFIG_PATH = os.path.join(root, "app_config.json")
+            os.makedirs(os.path.join(root, "체크리스트"))
+            os.makedirs(os.path.join(root, "고효율 광원", "2026-09-20 유진철강"))
+            shutil.copy2(CHECKLIST, os.path.join(root, "체크리스트"))
+            with open(SAMPLE, "rb") as fh:
+                qbytes = fh.read()
+            data = {
+                "setting03_root": root, "category": "고효율", "company": "유진철강산업㈜",
+                "inspector": "유찬희 책임연구원", "inspect_date": "2026-09-20",
+                "quote": (io.BytesIO(qbytes), "견적서.pdf"),
+            }
+            r = self.client.post("/batch_run", data=data, content_type="multipart/form-data")
+            self.assertEqual(r.status_code, 200)
+            j = r.get_json()
+            self.assertEqual(j["item_count"], 1)
+            self.assertEqual(j["total_supply"], 5043168)
+            self.assertGreaterEqual(len(j["placed_files"]), 3)
+            self.assertEqual(j["checklist"]["misses"], [])
+        finally:
+            appmod._CONFIG_PATH = original_config_path
 
 
 if __name__ == "__main__":
