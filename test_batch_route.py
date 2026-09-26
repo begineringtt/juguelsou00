@@ -35,6 +35,11 @@ class BatchRouteTest(unittest.TestCase):
         html = r.get_data(as_text=True)
         self.assertIn('id="budgetCheckBtn"', html)
 
+    def test_batch_page_includes_scaffold_folders_button(self):
+        r = self.client.get("/batch")
+        html = r.get_data(as_text=True)
+        self.assertIn('id="scaffoldFoldersBtn"', html)
+
     def test_batch_page_includes_attachment_match_panel(self):
         r = self.client.get("/batch")
         html = r.get_data(as_text=True)
@@ -120,6 +125,31 @@ class BatchRouteTest(unittest.TestCase):
         j = r.get_json()
         missing = {(m["project"], m["company"]) for m in j["missing"]}
         self.assertIn(("자동화", "태광테크"), missing)
+
+    def test_scaffold_folders_rejects_missing_setting03_root(self):
+        r = self.client.post("/scaffold_folders", data={"setting03_root": ""})
+        self.assertEqual(r.status_code, 400)
+
+    def test_scaffold_folders_creates_planned_company_folders(self):
+        import openpyxl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_wb = openpyxl.Workbook()
+            plan_ws = plan_wb.active
+            plan_ws.title = "결제금액 계획"
+            plan_ws["D1"] = "태광테크"
+            plan_ws["B3"] = "자동화"
+            plan_ws["C3"] = "계획"
+            plan_ws["D3"] = 2000000
+            plan_wb.save(os.path.join(tmp, "연구비 소진 계획.xlsx"))
+
+            r = self.client.post("/scaffold_folders", data={"setting03_root": tmp})
+
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "자동화", "태광테크")))
+        j = r.get_json()
+        created = {(c["folder"], c["company"]) for c in j["created"]}
+        self.assertIn(("자동화", "태광테크"), created)
 
     def test_parse_quote_route_reports_exact_attachment_match(self):
         import openpyxl

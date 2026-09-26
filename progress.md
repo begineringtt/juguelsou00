@@ -46,6 +46,7 @@ Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계�
 
 - [x] `/batch_run` 완료 결과에 "폴더 열기" 버튼 추가 — 백엔드 `/open_folder`(`os.startfile()`)와 프론트 버튼 연결, 이미 응답에 있었지만 화면에 안 쓰이던 `target_dir`을 재사용
 - [x] "연구비 소진 계획.xlsx"(과제x업체 계획 금액) 대비 진행 현황 체크 기능 신규 추가(`budget_check.py`) — 아직 안 만든 (과제,업체) 목록/개수, 계획 대비 실제 금액이 다른 건, "01. 지출결의서_전체과제_통합(양식).xlsx" 기준 문서가 하나도 없는 과제를 계산. `/batch` 화면에 "체크 실행" 버튼으로 연결. 실제 setting_03 데이터로 검증: 70개 미작성, 1건 금액 불일치(자동화/부강기업 계획 200만원 vs 실제 411만원), 로봇·탄소 과제는 문서 자체가 없음 — 전부 실제 폴더 상태와 일치하는 걸 직접 확인.
+- [x] "연구비 소진 계획.xlsx" 기준으로 (과제,업체) 폴더를 미리 만들어두는 기능 추가(`budget_check.scaffold_folders`) — 이미 비슷한 이름의 폴더(날짜 접두 등 포함)가 있으면 건너뛰고, 없는 조합만 새 폴더로 생성. `/batch` 화면에 "빠진 폴더 전부 만들기" 버튼으로 연결. **실제 setting_03에는 아직 실행 안 함 — 사용자가 직접 버튼을 눌러 실행하도록 남겨둠**(70개 폴더가 한 번에 생기는 실제 변경이라 사용자가 직접 트리거하는 게 맞다고 판단).
 
 ## In Progress
 
@@ -56,12 +57,13 @@ Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계�
 1. ~~**`/batch_run`(실행 버튼)의 품목 표 OCR 속도**~~ — [2026-09-26] 완료: 헤더 탐색을 하이브리드(전체 이미지 1회 OCR 사전 필터 + 후보 행만 정밀 재OCR)로 교체. 아래 "Completed" 항목 참고.
 2. ~~**origin push 여부 결정**~~ — [2026-09-26] 완료: 사용자 확인 후 14커밋 전부 origin/main에 push함.
 3. 사용자가 직접 `실행.bat` / `견적서자동정리_실행.bat`을 다시 실행해서, 이번 세션에서 고친 것들이 실사용 환경에서도 기대대로 동작하는지 최종 확인 필요 (특히 처음 신고했던 "회전된 사진 인식 안 됨", "ERR_CONNECTION_REFUSED", "Failed to fetch" 세 가지 원 증상이 실제로 재발 안 하는지, 그리고 이번에 고친 "실행 버튼 눌렀을 때 품목 추출이 너무 느림/멈춘 것 같음" 증상도 재발 안 하는지).
-4. ~~(이전 세션에서 넘어온) `.claude/worktrees/pdf-header-and-item-columns`, `.claude/worktrees/pdf-header-and-projects` 두 워크트리 상태 확인~~ — [2026-09-22] 확인 완료: 둘 다 이미 `main`에 다른 구현으로 들어간(superseded) 작업이라 워크트리 디렉토리는 삭제. 커밋은 브랜치(`worktree-pdf-header-and-item-columns`, `worktree-pdf-header-and-projects`)와 백업 태그(`backup/pdf-header-and-item-columns-2026-09-22`, `backup/pdf-header-and-projects-2026-09-22`)로 보존.
+4. **"빠진 폴더 전부 만들기" 버튼을 실제 setting_03에 아직 실행 안 함** — 로직은 격리된 임시 폴더로 TDD 검증 완료했지만, 실제 데이터에 70개 폴더를 한 번에 만드는 건 사용자가 직접 버튼을 눌러 실행해야 함.
+5. ~~(이전 세션에서 넘어온) `.claude/worktrees/pdf-header-and-item-columns`, `.claude/worktrees/pdf-header-and-projects` 두 워크트리 상태 확인~~ — [2026-09-22] 확인 완료: 둘 다 이미 `main`에 다른 구현으로 들어간(superseded) 작업이라 워크트리 디렉토리는 삭제. 커밋은 브랜치(`worktree-pdf-header-and-item-columns`, `worktree-pdf-header-and-projects`)와 백업 태그(`backup/pdf-header-and-item-columns-2026-09-22`, `backup/pdf-header-and-projects-2026-09-22`)로 보존.
 
 ## Changed Files
 
-- `budget_check.py`(신규): 연구비 소진 계획 대비 진행 현황 체크(`load_plan`, `load_actual_totals`, `load_master_projects`, `check_progress`)
-- `app.py`: `/open_folder`(`os.startfile()`), `/budget_check`(`budget_check.check_progress()`) 라우트 신규 추가. `/batch_parse_quote`에 `attachment_match`(정확/유사 매칭) 추가, `/batch_run`에 `attachment_company_override`/`skip_auto_attachments` 필드 추가, `_startup_path()`/`_RUN_KWARGS`(threaded=True) 추가
+- `budget_check.py`(신규): 연구비 소진 계획 대비 진행 현황 체크(`load_plan`, `load_actual_totals`, `load_master_projects`, `check_progress`, `scaffold_folders`)
+- `app.py`: `/open_folder`(`os.startfile()`), `/budget_check`(`budget_check.check_progress()`), `/scaffold_folders`(`budget_check.scaffold_folders()`) 라우트 신규 추가. `/batch_parse_quote`에 `attachment_match`(정확/유사 매칭) 추가, `/batch_run`에 `attachment_company_override`/`skip_auto_attachments` 필드 추가, `_startup_path()`/`_RUN_KWARGS`(threaded=True) 추가
 - `attachment_finder.py`: `match_company()`를 정확 매칭 전용으로 축소, `find_fuzzy_candidates()` 신규 추가
 - `automation.py`: `run()`에 `attachment_company_override` 파라미터 추가
 - `folder_router.py`: `folder_for_category()`가 미지원 카테고리에서 예외 대신 폴백하도록 변경
@@ -69,12 +71,12 @@ Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계�
 - `pdf_item_parser.py`: `fix_image_orientation()` 신규 추가(OSD 기반 회전 보정). [2026-09-26] `_build_table_from_grid()`의 헤더 탐색을 하이브리드 사전 필터 방식으로 교체(전체 이미지 1회 `_ocr_words()` 결과로 `_match_row_labels()`를 이용해 후보 행만 저렴하게 추리고, 그 후보 행에 대해서만 기존 `_ocr_cell()` 정밀 재확인), body_end가 배열 끝까지 자랄 때의 오프바이원 경계 버그 수정
 - `pipeline.py`: `project_for_category()`가 사용자 저장 과제 목록을 우선 쓰도록 정리
 - `quote_reader.py`: `company_only` 옵션, 이미지 경로 전처리 통일(회전보정→그레이스케일→이진화→deskew→노이즈제거), `_extract_single_item_from_spec_sheet()`(세로형 스펙시트 폴백) 추가
-- `templates/batch.html`: 과제 추가/수정/삭제 UI, 견적서 드래그앤드롭, 업체명 자동 인식 + 재업로드 시 갱신, 유사 매칭 확인 패널. [2026-09-26] "폴더 열기" 버튼, "연구비 소진 계획 대비 진행 현황" 카드(체크 실행 버튼 + 결과 표) 추가
+- `templates/batch.html`: 과제 추가/수정/삭제 UI, 견적서 드래그앤드롭, 업체명 자동 인식 + 재업로드 시 갱신, 유사 매칭 확인 패널. [2026-09-26] "폴더 열기" 버튼, "연구비 소진 계획 대비 진행 현황" 카드(체크 실행 + 빠진 폴더 전부 만들기 버튼 + 결과 표) 추가
 - `templates/index.html`: `/batch`로 가는 링크 추가
 - `견적서자동정리_실행.bat`: `GP_OPEN_PAGE=batch` 환경변수 설정 추가
 - `.gitignore`: `data/app_config.json` 추가(로컬 전용 설정, 커밋 대상 아님)
 - `test_automation.py`, `test_automation_attachment_override.py`(신규), `test_batch_route.py`, `test_pipeline_project_for_category.py`, `test_quote_reader.py`(신규), `test_startup_page.py`(신규), `test_template_banner.py`: 위 변경사항에 대한 TDD 테스트
-- `test_budget_check.py`(신규, 10개): `resolve_folder`/`load_plan`/`load_master_projects`/`load_actual_totals`/`check_progress` 전체 TDD 테스트. `test_batch_route.py`에 `/open_folder`, `/budget_check` 라우트 테스트 6개 추가
+- `test_budget_check.py`(신규, 13개): `resolve_folder`/`load_plan`/`load_master_projects`/`load_actual_totals`/`check_progress`/`scaffold_folders` 전체 TDD 테스트. `test_batch_route.py`에 `/open_folder`, `/budget_check`, `/scaffold_folders` 라우트 테스트 8개 추가
 - `test_pdf_item_parser.py`: [2026-09-26] `test_build_table_from_grid_prefilters_candidate_rows_before_cell_ocr` 신규 추가 — 후보 행 전부가 아니라 헤더 라벨이 있는 소수의 행에만 정밀 셀 재OCR이 호출되는지 검증(합성 격자 이미지 + `_ocr_words`/`_ocr_cell` 목킹). 수정 전 코드로는 이 테스트가 실패함을 `git stash`로 직접 확인.
 
 ## Commands Run

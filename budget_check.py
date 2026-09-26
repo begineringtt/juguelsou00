@@ -129,6 +129,40 @@ def check_progress(setting03_root, plan_path=None, master_path=None, report_path
     }
 
 
+def scaffold_folders(setting03_root, plan_path=None):
+    """"연구비 소진 계획.xlsx"에 있는 (과제,업체) 조합마다 업체 하위 폴더를
+    미리 만들어 둔다. 이미 비슷한 이름의 폴더가 있으면(날짜/차수 접두 등이
+    붙은 기존 폴더 포함) 새로 만들지 않고 건너뛴다.
+
+    반환: {"created": [{folder,company,path}], "already_existed": [{folder,company,matched_folder}]}
+    """
+    plan_path = plan_path or os.path.join(setting03_root, DEFAULT_PLAN_FILENAME)
+    plan_rows = load_plan(plan_path)
+
+    seen = set()
+    created, already_existed = [], []
+    for row in plan_rows:
+        folder, company = row["folder"], row["company"]
+        if (folder, company) in seen:
+            continue
+        seen.add((folder, company))
+
+        folder_root = os.path.join(setting03_root, folder)
+        existing = [n for n in os.listdir(folder_root) if os.path.isdir(os.path.join(folder_root, n))] \
+            if os.path.isdir(folder_root) else []
+        cols = dict(enumerate(existing))
+        idx = CU._match_company_column(cols, company)
+        if idx is not None:
+            already_existed.append({"folder": folder, "company": company, "matched_folder": existing[idx]})
+            continue
+
+        path = os.path.join(folder_root, company)
+        os.makedirs(path, exist_ok=True)
+        created.append({"folder": folder, "company": company, "path": path})
+
+    return {"created": created, "already_existed": already_existed}
+
+
 def load_master_projects(master_path):
     """"01. 지출결의서_전체과제_통합(양식).xlsx"의 시트 이름(과제 목록)을 그대로
     반환한다 - 이 문서의 내부 구조까지는 비교하지 않고, "이 과제들이 있어야

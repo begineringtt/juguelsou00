@@ -385,6 +385,18 @@ def budget_check_route():
     return jsonify(result)
 
 
+@app.route("/scaffold_folders", methods=["POST"])
+def scaffold_folders_route():
+    setting03_root = request.form.get("setting03_root", "").strip()
+    if not setting03_root or not os.path.isdir(setting03_root):
+        return jsonify({"error": f"setting_03 경로를 찾을 수 없습니다: {setting03_root}"}), 400
+    try:
+        result = budget_check.scaffold_folders(setting03_root)
+    except FileNotFoundError as e:
+        return jsonify({"error": f"필요한 파일을 찾을 수 없습니다: {e}"}), 400
+    return jsonify(result)
+
+
 def _startup_path():
     # 실행.bat / 견적서자동정리_실행.bat 이 둘 다 그냥 python app.py 만 실행하기
     # 때문에, 어느 화면을 열지는 각 .bat이 미리 심어둔 GP_OPEN_PAGE 환경변수로

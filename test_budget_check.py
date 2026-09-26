@@ -195,5 +195,52 @@ class CheckProgressTest(unittest.TestCase):
         self.assertNotIn("자동화", result["projects_without_any_report"])
 
 
+class ScaffoldFoldersTest(unittest.TestCase):
+    def test_creates_folder_for_planned_company_with_no_existing_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = os.path.join(tmp, "연구비 소진 계획.xlsx")
+            # _write_plan_workbook: 자동화(태광테크 2,000,000/부강기업 3,000,000),
+            # 고효율(부강기업 2,000,000, "고효율 광원" 폴더로 해석됨)
+            _write_plan_workbook(plan_path)
+
+            result = budget_check.scaffold_folders(tmp, plan_path=plan_path)
+
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "자동화", "태광테크")))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "자동화", "부강기업")))
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "고효율 광원", "부강기업")))
+        created = {(c["folder"], c["company"]) for c in result["created"]}
+        self.assertEqual(created, {
+            ("자동화", "태광테크"), ("자동화", "부강기업"), ("고효율 광원", "부강기업"),
+        })
+        self.assertEqual(result["already_existed"], [])
+
+    def test_does_not_duplicate_an_existing_similarly_named_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "자동화", "2026.01.01 태광테크"))
+            plan_path = os.path.join(tmp, "연구비 소진 계획.xlsx")
+            _write_plan_workbook(plan_path)
+
+            result = budget_check.scaffold_folders(tmp, plan_path=plan_path)
+
+            # 이미 날짜가 붙은 업체 폴더가 있으면 새 폴더를 또 만들면 안 된다.
+            self.assertFalse(os.path.isdir(os.path.join(tmp, "자동화", "태광테크")))
+            entries = set(os.listdir(os.path.join(tmp, "자동화")))
+            self.assertEqual(entries, {"2026.01.01 태광테크", "부강기업"})
+        already = {(c["folder"], c["company"]) for c in result["already_existed"]}
+        self.assertIn(("자동화", "태광테크"), already)
+        created = {(c["folder"], c["company"]) for c in result["created"]}
+        self.assertIn(("자동화", "부강기업"), created)
+        self.assertNotIn(("자동화", "태광테크"), created)
+
+    def test_creates_project_folder_itself_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = os.path.join(tmp, "연구비 소진 계획.xlsx")
+            _write_plan_workbook(plan_path)
+
+            budget_check.scaffold_folders(tmp, plan_path=plan_path)
+
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "자동화")))
+
+
 if __name__ == "__main__":
     unittest.main()
