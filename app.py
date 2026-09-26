@@ -8,6 +8,7 @@ from flask import Flask, jsonify, redirect, render_template, request, send_file,
 
 import attachment_finder
 import automation
+import budget_check
 import column_settings
 import history_store
 import quote_reader
@@ -361,6 +362,27 @@ def batch_run():
         "checklist": manifest.get("checklist"),
         "report_path": manifest.get("report_path"),
     })
+
+
+@app.route("/open_folder", methods=["POST"])
+def open_folder():
+    path = request.form.get("path", "").strip()
+    if not path or not os.path.isdir(path):
+        return jsonify({"error": f"폴더를 찾을 수 없습니다: {path}"}), 400
+    os.startfile(path)
+    return jsonify({"ok": True})
+
+
+@app.route("/budget_check", methods=["POST"])
+def budget_check_route():
+    setting03_root = request.form.get("setting03_root", "").strip()
+    if not setting03_root or not os.path.isdir(setting03_root):
+        return jsonify({"error": f"setting_03 경로를 찾을 수 없습니다: {setting03_root}"}), 400
+    try:
+        result = budget_check.check_progress(setting03_root)
+    except FileNotFoundError as e:
+        return jsonify({"error": f"필요한 파일을 찾을 수 없습니다: {e}"}), 400
+    return jsonify(result)
 
 
 def _startup_path():

@@ -28,7 +28,7 @@
              padding:12px 20px; font-size:15px; font-weight:700; cursor:pointer; }
     button.secondary { background:#fff; color:var(--ink); border:1px solid var(--line); }
     .actions { display:flex; gap:10px; align-items:center; margin-top:18px; }
-    #result { white-space:pre-wrap; font-size:13px; }
+    #result, #budgetCheckResult { white-space:pre-wrap; font-size:13px; }
     .ok { color:#1b7f2b; } .warn { color:#b26a00; } .err { color:#c0392b; }
     table { width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
     th,td { border:1px solid var(--line); padding:6px 8px; text-align:left; }
@@ -127,6 +127,18 @@
 
     <div class="card" id="resultCard" style="display:none">
       <div id="result"></div>
+      <button type="button" class="secondary" id="openFolderBtn" style="display:none; margin-top:10px">폴더 열기</button>
+    </div>
+
+    <div class="card">
+      <label>연구비 소진 계획 대비 진행 현황</label>
+      <div class="hint">setting_03 폴더에 있는 "연구비 소진 계획.xlsx"(계획 금액)와
+        "01. 지출결의서_전체과제_통합(양식).xlsx"(과제 목록) 기준으로, 아직 지출결의서를
+        안 만든 (과제,업체)와 계획과 실제 금액이 다른 건을 찾습니다.</div>
+      <div class="actions" style="margin-top:10px;">
+        <button type="button" class="secondary" id="budgetCheckBtn">체크 실행</button>
+      </div>
+      <div id="budgetCheckResult" style="margin-top:10px; font-size:13px;"></div>
     </div>
   </div>
 
@@ -134,6 +146,54 @@
 const f = document.getElementById('f');
 const resultCard = document.getElementById('resultCard');
 const result = document.getElementById('result');
+const openFolderBtn = document.getElementById('openFolderBtn');
+
+openFolderBtn.addEventListener('click', async () => {
+  const path = openFolderBtn.dataset.path;
+  if (!path) return;
+  try {
+    const res = await fetch('/open_folder', { method:'POST', body: new URLSearchParams({ path }) });
+    if (!res.ok) { const d = await res.json(); alert('폴더 열기 실패: ' + (d.error||'')); }
+  } catch (e) {
+    alert('폴더 열기 실패: ' + e);
+  }
+});
+
+const budgetCheckBtn = document.getElementById('budgetCheckBtn');
+const budgetCheckResult = document.getElementById('budgetCheckResult');
+
+budgetCheckBtn.addEventListener('click', async () => {
+  const setting03Root = f.querySelector('input[name="setting03_root"]').value.trim();
+  if (!setting03Root) { budgetCheckResult.innerHTML = '<span class="err">setting_03 폴더 경로를 먼저 입력해주세요.</span>'; return; }
+  budgetCheckResult.innerHTML = '체크 중입니다…';
+  try {
+    const res = await fetch('/budget_check', { method:'POST', body: new URLSearchParams({ setting03_root: setting03Root }) });
+    const d = await res.json();
+    if (!res.ok) { budgetCheckResult.innerHTML = '<span class="err">오류: ' + (d.error||'') + '</span>'; return; }
+    let html = '';
+    html += `<b>앞으로 ${d.missing_count}개 더 만들어야 합니다.</b>\n`;
+    if (d.projects_without_any_report && d.projects_without_any_report.length)
+      html += `<span class="warn">[과제 전체 미착수] ${d.projects_without_any_report.join(', ')}</span>\n`;
+    if (d.missing && d.missing.length) {
+      html += '\n<b>아직 안 만든 (과제,업체)</b>\n';
+      html += '<table><tr><th>과제</th><th>업체</th><th>계획 금액</th></tr>';
+      for (const m of d.missing) html += `<tr><td>${m.project}</td><td>${m.company}</td>` +
+        `<td>${Number(m.planned_amount).toLocaleString()}원</td></tr>`;
+      html += '</table>';
+    }
+    if (d.mismatches && d.mismatches.length) {
+      html += '\n<b>계획과 실제 금액이 다른 건</b>\n';
+      html += '<table><tr><th>과제</th><th>업체</th><th>계획</th><th>실제</th><th>차이</th></tr>';
+      for (const m of d.mismatches) html += `<tr><td>${m.project}</td><td>${m.company}</td>` +
+        `<td>${Number(m.planned_amount).toLocaleString()}원</td><td>${Number(m.actual_amount).toLocaleString()}원</td>` +
+        `<td>${Number(m.diff).toLocaleString()}원</td></tr>`;
+      html += '</table>';
+    }
+    budgetCheckResult.innerHTML = html;
+  } catch (e) {
+    budgetCheckResult.innerHTML = '<span class="err">요청 실패: ' + e + '</span>';
+  }
+});
 
 // ---- 과제 카테고리 (지출결의서 단독 화면과 동일한 데이터를 공유) ----
 let PROJECTS = {{ projects | tojson }};
@@ -414,8 +474,15 @@ async function run(dry) {
     }
     if (d.report_path) html += `\n[처리이력] ${d.report_path}`;
     result.innerHTML = html;
+    if (d.target_dir) {
+      openFolderBtn.dataset.path = d.target_dir;
+      openFolderBtn.style.display = 'inline-block';
+    } else {
+      openFolderBtn.style.display = 'none';
+    }
   } catch (e) {
     result.innerHTML = '<span class="err">요청 실패: ' + e + '</span>';
+    openFolderBtn.style.display = 'none';
   }
 }
 f.addEventListener('submit', e => { e.preventDefault(); run(false); });
