@@ -12,7 +12,7 @@ Last updated: 2026-09-26
 - Status: In progress (핵심 플로우는 동작 확인됨, 남은 과제 있음 — 아래 Next Steps 참고)
 - Current focus: 없음 — 사용자 확인 대기 중 (이 문서 작성 시점에 막 완료한 작업들의 실사용 검증)
 - Branch: `main` (로컬에서만 작업, 브랜치 분리 없이 직접 커밋)
-- Related issue/PR: 없음 (origin에 아직 push 안 함 — `main`이 `origin/main` 대비 **13커밋 앞선 상태**, 이 세션에서 만든 11개 + 이전 세션 2개)
+- Related issue/PR: 없음. [2026-09-26] `main`을 origin에 push 완료(14커밋) — 이제 `main`과 `origin/main`이 동일한 상태.
 
 ## Decisions
 
@@ -49,7 +49,7 @@ Last updated: 2026-09-26
 ## Next Steps
 
 1. ~~**`/batch_run`(실행 버튼)의 품목 표 OCR 속도**~~ — [2026-09-26] 완료: 헤더 탐색을 하이브리드(전체 이미지 1회 OCR 사전 필터 + 후보 행만 정밀 재OCR)로 교체. 아래 "Completed" 항목 참고.
-2. **origin push 여부 결정** — 로컬 `main`이 `origin/main` 대비 이제 **14커밋** 앞섬(이전 세션 2개 + 2026-09-22 세션 11개 + 이번 세션 OCR 속도 수정 1개). 언제/어떻게 원격에 반영할지 사용자와 논의 필요.
+2. ~~**origin push 여부 결정**~~ — [2026-09-26] 완료: 사용자 확인 후 14커밋 전부 origin/main에 push함.
 3. 사용자가 직접 `실행.bat` / `견적서자동정리_실행.bat`을 다시 실행해서, 이번 세션에서 고친 것들이 실사용 환경에서도 기대대로 동작하는지 최종 확인 필요 (특히 처음 신고했던 "회전된 사진 인식 안 됨", "ERR_CONNECTION_REFUSED", "Failed to fetch" 세 가지 원 증상이 실제로 재발 안 하는지, 그리고 이번에 고친 "실행 버튼 눌렀을 때 품목 추출이 너무 느림/멈춘 것 같음" 증상도 재발 안 하는지).
 4. ~~(이전 세션에서 넘어온) `.claude/worktrees/pdf-header-and-item-columns`, `.claude/worktrees/pdf-header-and-projects` 두 워크트리 상태 확인~~ — [2026-09-22] 확인 완료: 둘 다 이미 `main`에 다른 구현으로 들어간(superseded) 작업이라 워크트리 디렉토리는 삭제. 커밋은 브랜치(`worktree-pdf-header-and-item-columns`, `worktree-pdf-header-and-projects`)와 백업 태그(`backup/pdf-header-and-item-columns-2026-09-22`, `backup/pdf-header-and-projects-2026-09-22`)로 보존.
 
@@ -99,5 +99,5 @@ python test_automation_combined_pdf.py # 1개 — PASS
 
 - ~~**`/batch_run` 전체 실행 시 품목 OCR 속도**가 여전히 사진 크기/표 칸 수에 따라 몇 분씩 걸릴 수 있음~~ — [2026-09-26] 해결: 헤더 탐색을 하이브리드 사전 필터로 교체해 근본 속도 개선. 다만 이미지가 너무 노이즈가 심해 전체 이미지 1회 OCR에서 라벨 후보가 하나도 안 잡히면(예: 관수작업 비교견적서.jpg) 품목을 못 찾고 조기 종료함 — 이는 원본 사진 품질 한계이지, 무한정 느려지는 문제는 아님.
 - 이미지 품질이 낮은(흐림/저해상도) 견적서 사진은 회전 보정 + 전처리를 다 거쳐도 업체명/품목을 못 찾을 수 있음 — 코드 버그가 아니라 원본 사진 품질의 근본적 한계. 화면에 경고 문구는 뜨지만, 사용자가 이를 "버그"로 다시 인식하고 신고할 가능성 있음.
-- 원격(origin)에 13커밋 밀려 있음 — 이 PC 외 다른 환경/협업자가 있다면 동기화 필요.
+- ~~원격(origin)에 13커밋 밀려 있음~~ — [2026-09-26] 해결: push 완료, `main`/`origin/main` 동기화됨.
 - `data/history.json`, `data/projects.json`, `data/column_settings.json`, `data/app_config.json`은 전부 `.gitignore` 대상(로컬 전용 데이터) — 이 PC를 벗어나면(재설치 등) 사용자가 직접 추가한 과제/컬럼 설정이 다시 초기화됨. 별도 백업/이관 방법이 필요할 수 있음.
