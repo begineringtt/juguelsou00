@@ -89,12 +89,19 @@ def check_progress(setting03_root, plan_path=None, master_path=None, report_path
         totals_by_folder.setdefault(folder, []).append((company, amount))
 
     missing, mismatches = [], []
+    project_totals = {}
     for row in plan_rows:
         folder = row["folder"]
         entries = scanned_by_folder.get(folder, [])
         cols = {i: e["company"] for i, e in enumerate(entries)}
         idx = CU._match_company_column(cols, row["company"])
         has_report = idx is not None and "지출결의서" in entries[idx]["docs"]
+
+        totals = project_totals.setdefault(row["project"], {"planned": 0, "done": 0})
+        totals["planned"] += 1
+        if has_report:
+            totals["done"] += 1
+
         if not has_report:
             missing.append({
                 "project": row["project"], "folder": folder,
@@ -121,11 +128,30 @@ def check_progress(setting03_root, plan_path=None, master_path=None, report_path
         if not any("지출결의서" in e["docs"] for e in scanned_by_folder.get(folder, []))
     ]
 
+    def _percent(done, planned):
+        return round(100 * done / planned) if planned else 0
+
+    progress_by_project = [
+        {"project": project, "planned": t["planned"], "done": t["done"],
+         "percent": _percent(t["done"], t["planned"])}
+        for project, t in project_totals.items()
+    ]
+    progress_by_project.sort(key=lambda r: r["percent"])
+
+    overall_planned = sum(t["planned"] for t in project_totals.values())
+    overall_done = sum(t["done"] for t in project_totals.values())
+    overall_progress = {
+        "planned": overall_planned, "done": overall_done,
+        "percent": _percent(overall_done, overall_planned),
+    }
+
     return {
         "missing": missing,
         "missing_count": len(missing),
         "mismatches": mismatches,
         "projects_without_any_report": projects_without_any_report,
+        "progress_by_project": progress_by_project,
+        "overall_progress": overall_progress,
     }
 
 

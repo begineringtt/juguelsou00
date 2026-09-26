@@ -1,6 +1,6 @@
 # Progress: 견적서 기반 지출결의서·검수확인서 자동 정리 기능 개선
 
-Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계획 체크 추가)
+Last updated: 2026-09-26 (실행 중 경과/예상시간 표시 + 진행률 시각화 추가)
 
 ## Goal
 
@@ -24,6 +24,8 @@ Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계�
 - [2026-09-22] 검수확인서에는 금액(공급가)을 아예 안 보여주기로 함 — 검수확인서는 품목/규격/수량 확인용 문서지 금액 확인용이 아니라는 사용자 판단.
 - [2026-09-22] Flask 개발 서버를 `threaded=True`로 전환 — 느린 OCR 요청 하나가 서버 전체를 막아버리는 구조적 문제(ERR_CONNECTION_REFUSED, Failed to fetch 등 여러 증상의 공통 원인)였음.
 - [2026-09-22] `실행.bat`과 `견적서자동정리_실행.bat`이 서로 다른 기본 화면(`/` vs `/batch`)을 열도록 `GP_OPEN_PAGE` 환경변수로 분기 — 두 화면을 "개별 도구"로 쓰고 싶다는 사용자 요구에 맞춤.
+- [2026-09-26] 사용자가 "연구비 소진 계획 대비 체크가 반영이 안 된 것 같다"고 했지만 실제로는 버그가 아니라 "숫자 나열이라 한눈에 안 보인다"는 시각화 문제였음 — dataviz 스킬 기준으로 전체 진행률 큰 숫자 + 과제별 진행률 막대(단일 브랜드색 채움 + 회색 트랙, 완료율 낮은 순 정렬)를 기존 표 위에 추가.
+- [2026-09-26] `/batch_run` PDF 변환 중 경과/예상 남은 시간 표시는, 백엔드가 단일 동기 요청이라 실제 진행률 스트리밍이 어려워 브라우저 localStorage에 지난 실행 시간(최근 20개)을 기록해두고 그 평균을 다음 실행의 예상 소요시간으로 쓰는 방식을 택함 — 서버 구조를 바꾸지 않고도 매 실행마다 예측이 점점 정확해짐.
 - [2026-09-26] "연구비 소진 계획.xlsx" 체크 기능 설계 시, "01. 지출결의서_전체과제_통합(양식).xlsx"는 문서 내부 구조까지 비교하지 않고 과제 목록(시트 이름) 참조로만 쓰기로 함 — 사용자가 "문서 존재 여부만" 확인하면 된다고 답함. 금액 비교는 "계획 대비 오차금액까지" 포함하기로 함(사용자 답: "둘다") — 생성된 지출결의서 xlsx는 openpyxl로 저장된 수식이라 재파싱해도 계산된 값이 안 나오므로, 매번 실행 시 `report_writer.py`가 이미 남기는 `처리이력_보고서.xlsx`의 정적 견적 총액 값을 실제 금액 소스로 재사용함.
 - [2026-09-26] 과제 표기가 파일마다 3가지로 다름("중동IR"/"중동"/"IR", "AI(1년)"/"AICS1년"/"AI(1y)그린CS" 등) — 기존 `folder_router.CATEGORY_TO_FOLDER`(부분 문자열 별칭)를 우선 재사용하고, 그걸로 못 잡는 AI 두 과제만 `budget_check.py`에 로컬 별칭 추가.
 - [2026-09-26] `/batch_run`(품목까지 뽑는 전체 경로)의 격자 OCR 헤더 탐색을 고칠 때, "전체 이미지를 한 번만 OCR해서 셀 텍스트도 그 결과로 복원" 방식을 먼저 시도했으나 실제 샘플(`견적서_알루스퀘어.pdf`)에서 정확도 회귀가 났음(좁은 "품명" 열이 전체 페이지 OCR에서는 "ee" 같은 잡음으로 뭉개짐 — Tesseract가 psm 6 전체 페이지 모드에서 좁은 열 텍스트를 잘 못 읽는 게 근본 원인). 최종적으로는 "전체 이미지 OCR은 후보 행을 저렴하게 걸러내는 용도로만 쓰고, 실제 헤더 확정 + 본문 셀 값은 기존처럼 셀별 정밀 재OCR(`_ocr_cell`)을 그대로 쓰되 후보가 아닌 행은 건너뛴다"는 하이브리드로 확정 — 속도와 정확도를 둘 다 지키려면 "빠른 사전 필터 + 정밀 확정"조합이 필요했다는 게 핵심 교훈.
@@ -46,6 +48,8 @@ Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계�
 
 - [x] `/batch_run` 완료 결과에 "폴더 열기" 버튼 추가 — 백엔드 `/open_folder`(`os.startfile()`)와 프론트 버튼 연결, 이미 응답에 있었지만 화면에 안 쓰이던 `target_dir`을 재사용
 - [x] "연구비 소진 계획.xlsx"(과제x업체 계획 금액) 대비 진행 현황 체크 기능 신규 추가(`budget_check.py`) — 아직 안 만든 (과제,업체) 목록/개수, 계획 대비 실제 금액이 다른 건, "01. 지출결의서_전체과제_통합(양식).xlsx" 기준 문서가 하나도 없는 과제를 계산. `/batch` 화면에 "체크 실행" 버튼으로 연결. 실제 setting_03 데이터로 검증: 70개 미작성, 1건 금액 불일치(자동화/부강기업 계획 200만원 vs 실제 411만원), 로봇·탄소 과제는 문서 자체가 없음 — 전부 실제 폴더 상태와 일치하는 걸 직접 확인.
+- [x] `/batch_run` 실행 중 "경과 X초 · 예상 남은 시간 약 Y초" 표시 추가 — localStorage에 지난 실행 시간(최근 20개)을 기록해 평균으로 다음 실행 예상 소요시간을 추정, 1초마다 갱신. 실제 fetch를 흉내낸 지연 응답으로 playwright에서 중간 상태("경과 1초 · 예상 남은 시간 약 9초")까지 직접 확인.
+- [x] "연구비 소진 계획 대비 진행 현황"에 전체 진행률 큰 숫자("전체 진행률 33% (35/105건 완료)") + 과제별 진행률 막대(완료율 낮은 순 정렬) 추가 — `budget_check.check_progress()`가 `progress_by_project`/`overall_progress` 반환하도록 확장. 실제 데이터로 확인: 로봇·탄소 0%, 고효율 100% 등 한눈에 보임.
 - [x] "연구비 소진 계획.xlsx" 기준으로 (과제,업체) 폴더를 미리 만들어두는 기능 추가(`budget_check.scaffold_folders`) — 이미 비슷한 이름의 폴더(날짜 접두 등 포함)가 있으면 건너뛰고, 없는 조합만 새 폴더로 생성. `/batch` 화면에 "빠진 폴더 전부 만들기" 버튼으로 연결. **실제 setting_03에는 아직 실행 안 함 — 사용자가 직접 버튼을 눌러 실행하도록 남겨둠**(70개 폴더가 한 번에 생기는 실제 변경이라 사용자가 직접 트리거하는 게 맞다고 판단).
 
 ## In Progress
@@ -62,7 +66,7 @@ Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계�
 
 ## Changed Files
 
-- `budget_check.py`(신규): 연구비 소진 계획 대비 진행 현황 체크(`load_plan`, `load_actual_totals`, `load_master_projects`, `check_progress`, `scaffold_folders`)
+- `budget_check.py`(신규): 연구비 소진 계획 대비 진행 현황 체크(`load_plan`, `load_actual_totals`, `load_master_projects`, `check_progress`, `scaffold_folders`). [2026-09-26] `check_progress()`가 `progress_by_project`/`overall_progress`(과제별·전체 완료율)도 반환하도록 확장
 - `app.py`: `/open_folder`(`os.startfile()`), `/budget_check`(`budget_check.check_progress()`), `/scaffold_folders`(`budget_check.scaffold_folders()`) 라우트 신규 추가. `/batch_parse_quote`에 `attachment_match`(정확/유사 매칭) 추가, `/batch_run`에 `attachment_company_override`/`skip_auto_attachments` 필드 추가, `_startup_path()`/`_RUN_KWARGS`(threaded=True) 추가
 - `attachment_finder.py`: `match_company()`를 정확 매칭 전용으로 축소, `find_fuzzy_candidates()` 신규 추가
 - `automation.py`: `run()`에 `attachment_company_override` 파라미터 추가
@@ -71,12 +75,12 @@ Last updated: 2026-09-26 (배치 화면에 폴더 열기 + 연구비 소진 계�
 - `pdf_item_parser.py`: `fix_image_orientation()` 신규 추가(OSD 기반 회전 보정). [2026-09-26] `_build_table_from_grid()`의 헤더 탐색을 하이브리드 사전 필터 방식으로 교체(전체 이미지 1회 `_ocr_words()` 결과로 `_match_row_labels()`를 이용해 후보 행만 저렴하게 추리고, 그 후보 행에 대해서만 기존 `_ocr_cell()` 정밀 재확인), body_end가 배열 끝까지 자랄 때의 오프바이원 경계 버그 수정
 - `pipeline.py`: `project_for_category()`가 사용자 저장 과제 목록을 우선 쓰도록 정리
 - `quote_reader.py`: `company_only` 옵션, 이미지 경로 전처리 통일(회전보정→그레이스케일→이진화→deskew→노이즈제거), `_extract_single_item_from_spec_sheet()`(세로형 스펙시트 폴백) 추가
-- `templates/batch.html`: 과제 추가/수정/삭제 UI, 견적서 드래그앤드롭, 업체명 자동 인식 + 재업로드 시 갱신, 유사 매칭 확인 패널. [2026-09-26] "폴더 열기" 버튼, "연구비 소진 계획 대비 진행 현황" 카드(체크 실행 + 빠진 폴더 전부 만들기 버튼 + 결과 표) 추가
+- `templates/batch.html`: 과제 추가/수정/삭제 UI, 견적서 드래그앤드롭, 업체명 자동 인식 + 재업로드 시 갱신, 유사 매칭 확인 패널. [2026-09-26] "폴더 열기" 버튼, "연구비 소진 계획 대비 진행 현황" 카드(체크 실행 + 빠진 폴더 전부 만들기 버튼 + 진행률 막대 + 결과 표) 추가, `/batch_run` 실행 중 경과/예상 남은 시간 표시(localStorage 기반 추정)
 - `templates/index.html`: `/batch`로 가는 링크 추가
 - `견적서자동정리_실행.bat`: `GP_OPEN_PAGE=batch` 환경변수 설정 추가
 - `.gitignore`: `data/app_config.json` 추가(로컬 전용 설정, 커밋 대상 아님)
 - `test_automation.py`, `test_automation_attachment_override.py`(신규), `test_batch_route.py`, `test_pipeline_project_for_category.py`, `test_quote_reader.py`(신규), `test_startup_page.py`(신규), `test_template_banner.py`: 위 변경사항에 대한 TDD 테스트
-- `test_budget_check.py`(신규, 13개): `resolve_folder`/`load_plan`/`load_master_projects`/`load_actual_totals`/`check_progress`/`scaffold_folders` 전체 TDD 테스트. `test_batch_route.py`에 `/open_folder`, `/budget_check`, `/scaffold_folders` 라우트 테스트 8개 추가
+- `test_budget_check.py`(14개): `resolve_folder`/`load_plan`/`load_master_projects`/`load_actual_totals`/`check_progress`(진행률 포함)/`scaffold_folders` 전체 TDD 테스트. `test_batch_route.py`에 `/open_folder`, `/budget_check`, `/scaffold_folders` 라우트 테스트 8개 추가
 - `test_pdf_item_parser.py`: [2026-09-26] `test_build_table_from_grid_prefilters_candidate_rows_before_cell_ocr` 신규 추가 — 후보 행 전부가 아니라 헤더 라벨이 있는 소수의 행에만 정밀 셀 재OCR이 호출되는지 검증(합성 격자 이미지 + `_ocr_words`/`_ocr_cell` 목킹). 수정 전 코드로는 이 테스트가 실패함을 `git stash`로 직접 확인.
 
 ## Commands Run

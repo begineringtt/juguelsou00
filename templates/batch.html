@@ -29,6 +29,13 @@
     button.secondary { background:#fff; color:var(--ink); border:1px solid var(--line); }
     .actions { display:flex; gap:10px; align-items:center; margin-top:18px; }
     #result, #budgetCheckResult { white-space:pre-wrap; font-size:13px; }
+    .progress-hero { font-size:22px; font-weight:700; }
+    .progress-hero .muted { font-size:13px; font-weight:400; color:#5b6673; }
+    .progress-row { display:flex; align-items:center; gap:10px; margin-top:6px; font-size:12.5px; }
+    .progress-row .label { width:100px; flex-shrink:0; }
+    .progress-row .count { width:56px; flex-shrink:0; text-align:right; color:#5b6673; }
+    .bar-track { flex:1; height:10px; background:#e5e9ed; border-radius:5px; overflow:hidden; }
+    .bar-fill { height:100%; background:var(--brand); }
     .ok { color:#1b7f2b; } .warn { color:#b26a00; } .err { color:#c0392b; }
     table { width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
     th,td { border:1px solid var(--line); padding:6px 8px; text-align:left; }
@@ -149,6 +156,32 @@ const resultCard = document.getElementById('resultCard');
 const result = document.getElementById('result');
 const openFolderBtn = document.getElementById('openFolderBtn');
 
+// ---- 실행 소요시간 기록 -> 다음 실행의 예상 남은 시간 추정 ----
+const RUN_DURATION_STORAGE_KEY = 'gp_batch_run_durations_ms';
+const DEFAULT_RUN_ESTIMATE_MS = 30000; // 기록 없을 때(첫 실행) 기준값
+
+function loadRunDurations() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(RUN_DURATION_STORAGE_KEY) || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveRunDuration(ms) {
+  const arr = loadRunDurations();
+  arr.push(ms);
+  while (arr.length > 20) arr.shift();
+  try { localStorage.setItem(RUN_DURATION_STORAGE_KEY, JSON.stringify(arr)); } catch (e) {}
+}
+
+function estimateRunDurationMs() {
+  const arr = loadRunDurations();
+  if (!arr.length) return DEFAULT_RUN_ESTIMATE_MS;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
 openFolderBtn.addEventListener('click', async () => {
   const path = openFolderBtn.dataset.path;
   if (!path) return;
@@ -172,7 +205,15 @@ budgetCheckBtn.addEventListener('click', async () => {
     const d = await res.json();
     if (!res.ok) { budgetCheckResult.innerHTML = '<span class="err">오류: ' + (d.error||'') + '</span>'; return; }
     let html = '';
-    html += `<b>앞으로 ${d.missing_count}개 더 만들어야 합니다.</b>\n`;
+    const overall = d.overall_progress || {};
+    html += `<div class="progress-hero">전체 진행률 ${overall.percent ?? 0}% ` +
+            `<span class="muted">(${overall.done ?? 0}/${overall.planned ?? 0}건 완료)</span></div>`;
+    for (const p of (d.progress_by_project || [])) {
+      html += `<div class="progress-row"><div class="label">${p.project}</div>` +
+        `<div class="bar-track"><div class="bar-fill" style="width:${p.percent}%"></div></div>` +
+        `<div class="count">${p.done}/${p.planned}</div></div>`;
+    }
+    html += `\n<b>앞으로 ${d.missing_count}개 더 만들어야 합니다.</b>\n`;
     if (d.projects_without_any_report && d.projects_without_any_report.length)
       html += `<span class="warn">[과제 전체 미착수] ${d.projects_without_any_report.join(', ')}</span>\n`;
     if (d.missing && d.missing.length) {
@@ -464,7 +505,20 @@ async function run(dry) {
   const fd = new FormData(f);
   if (dry) fd.set('dry_run', '1');
   resultCard.style.display = 'block';
-  result.innerHTML = '처리 중입니다… (PDF 변환 때문에 십여 초 걸릴 수 있어요)';
+
+  const startedAt = Date.now();
+  const estimateMs = estimateRunDurationMs();
+  const updateProgressText = () => {
+    const elapsedMs = Date.now() - startedAt;
+    const remainingMs = estimateMs - elapsedMs;
+    const etaText = remainingMs > 1000
+      ? `예상 남은 시간 약 ${Math.round(remainingMs / 1000)}초`
+      : '예상보다 오래 걸리고 있어요…';
+    result.innerHTML = `처리 중입니다… (경과 ${Math.round(elapsedMs / 1000)}초 · ${etaText})`;
+  };
+  updateProgressText();
+  const progressTimer = setInterval(updateProgressText, 1000);
+
   try {
     const res = await fetch('/batch_run', { method:'POST', body: fd });
     const d = await res.json();
@@ -506,6 +560,9 @@ async function run(dry) {
   } catch (e) {
     result.innerHTML = '<span class="err">요청 실패: ' + e + '</span>';
     openFolderBtn.style.display = 'none';
+  } finally {
+    clearInterval(progressTimer);
+    saveRunDuration(Date.now() - startedAt);
   }
 }
 f.addEventListener('submit', e => { e.preventDefault(); run(false); });

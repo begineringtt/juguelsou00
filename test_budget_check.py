@@ -194,6 +194,39 @@ class CheckProgressTest(unittest.TestCase):
         self.assertIn("고효율 광원", result["projects_without_any_report"])
         self.assertNotIn("자동화", result["projects_without_any_report"])
 
+    def test_reports_per_project_and_overall_completion_percentage(self):
+        import report_writer
+
+        with tempfile.TemporaryDirectory() as tmp:
+            done_dir = os.path.join(tmp, "자동화", "2026.01.01 태광테크")
+            os.makedirs(done_dir)
+            with open(os.path.join(done_dir, "지출결의서_태광테크.xlsx"), "w") as f:
+                f.write("dummy")
+            os.makedirs(os.path.join(tmp, "자동화", "2026.01.02 부강기업"))
+
+            report_path = os.path.join(tmp, "체크리스트", "처리이력_보고서.xlsx")
+            os.makedirs(os.path.dirname(report_path))
+            report_writer.append_entry(report_path, {
+                "category": "자동화", "company": "태광테크", "folder": "자동화/태광테크",
+                "generated": ["지출결의서"], "attachments": [], "total_amount": 2500000,
+                "item_count": 1, "source": "pdf-table", "note": "",
+            })
+
+            plan_path = os.path.join(tmp, "연구비 소진 계획.xlsx")
+            _write_plan_workbook(plan_path)  # 자동화: 태광테크(완료)/부강기업(미완료), 고효율: 부강기업(미완료)
+
+            master_path = os.path.join(tmp, "01. 지출결의서_전체과제_통합(양식).xlsx")
+            self._write_master(master_path, ["자동화", "고효율"])
+
+            result = budget_check.check_progress(
+                tmp, plan_path=plan_path, master_path=master_path, report_path=report_path)
+
+        by_project = {p["project"]: p for p in result["progress_by_project"]}
+        self.assertEqual(by_project["자동화"], {"project": "자동화", "planned": 2, "done": 1, "percent": 50})
+        self.assertEqual(by_project["고효율"], {"project": "고효율", "planned": 1, "done": 0, "percent": 0})
+
+        self.assertEqual(result["overall_progress"], {"planned": 3, "done": 1, "percent": 33})
+
 
 class ScaffoldFoldersTest(unittest.TestCase):
     def test_creates_folder_for_planned_company_with_no_existing_match(self):
