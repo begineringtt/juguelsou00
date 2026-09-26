@@ -870,8 +870,33 @@ def _build_table_from_grid(pil_image, synonyms=None):
     if len(row_positions) < 3:
         return None
 
-    header_idx, best_score, col_positions = None, 0, None
+    # 후보 행 전체(사진처럼 격자선 검출이 지저분하면 수십~수백 개)를 셀마다
+    # 별도 Tesseract 프로세스로 재OCR하면 몇 분씩 걸린다. 대신 전체 이미지를
+    # 한 번만 OCR해서(words) 각 행 구간에 알려진 헤더 라벨(수량/단가 등)이
+    # 몇 개나 걸리는지 셀 경계 없이 저렴하게 먼저 점수만 매기고, 점수가 있는
+    # 소수의 후보 행에 대해서만 기존의 정밀한 셀 단위 재OCR로 실제 헤더인지
+    # 확인한다. 전체 이미지 OCR은 좁은 열(예: 품명)의 글자를 뭉개서 놓치는
+    # 경우가 있어(예: "품명"을 통째로 "ee" 같은 잡음으로 오인식) 후보 자체를
+    # 이 결과만으로 최종 확정하지는 않는다 - 셀 단위 재OCR이 그 열도 정확히
+    # 다시 읽어낸다.
+    words = _ocr_words(pil_image)
+    row_scores = []
     for r in range(len(row_positions) - 1):
+        y0, y1 = row_positions[r], row_positions[r + 1]
+        row_words = sorted(
+            (w for w in words if y0 <= w["top"] + w["height"] / 2 <= y1),
+            key=lambda w: w["left"],
+        )
+        if not row_words:
+            continue
+        score = len(_match_row_labels(row_words, synonyms=synonyms))
+        if score:
+            row_scores.append((score, r))
+    row_scores.sort(reverse=True)
+    candidate_rows = sorted(r for _, r in row_scores[:20])
+
+    header_idx, best_score, col_positions = None, 0, None
+    for r in candidate_rows:
         y0, y1 = row_positions[r], row_positions[r + 1]
         cols = _cluster_positions(np.sum(vertical_lines[y0:y1, :] > 0, axis=0).astype(float))
         if len(cols) < 2:
@@ -887,7 +912,12 @@ def _build_table_from_grid(pil_image, synonyms=None):
 
     header_height = row_positions[header_idx + 1] - row_positions[header_idx]
     body_end = header_idx + 1
-    while body_end + 1 < len(row_positions):
+    # body_end는 항상 row_positions[body_end + 1]로 다음 경계를 읽으므로,
+    # row_positions의 마지막 인덱스(len-1)까지 자라면 안 된다 - 그러면
+    # 아래 table 구성 루프에서 범위를 벗어난다. 표가 페이지/사진 맨 끝
+    # 경계선까지 이어져 "다음 박스로 넘어가는 큰 간격"이 전혀 없는 경우에도
+    # 안전해야 한다.
+    while body_end + 2 < len(row_positions):
         if row_positions[body_end + 1] - row_positions[body_end] > header_height * 3:
             break
         body_end += 1

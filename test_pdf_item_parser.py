@@ -499,6 +499,61 @@ def test_ocr_cell_strips_border_noise_characters():
     print("OK: test_ocr_cell_strips_border_noise_characters")
 
 
+def test_build_table_from_grid_prefilters_candidate_rows_before_cell_ocr():
+    # 사진처럼 격자선 검출이 지저분해 후보 행이 수십 개로 잡히는 경우, 예전에는
+    # 후보 행 x 열 전부를 셀마다 별도 Tesseract 프로세스로 재OCR해서(_ocr_cell)
+    # 몇 분씩 걸렸다. 이제는 전체 이미지 OCR(_ocr_words) 결과로 알려진 헤더
+    # 라벨이 있는 소수의 행만 골라 그 행에서만 _ocr_cell을 부른다.
+    from PIL import Image, ImageDraw
+
+    W, H = 500, 700
+    img = Image.new("L", (W, H), color=255)
+    draw = ImageDraw.Draw(img)
+    # y=250~300 한 행만 실제 헤더고, 그 아래는 큰 간격(300~600)을 두어 표
+    # 본문이 곧바로 끝나게 한다 - 그래도 위쪽에는 헤더처럼 보일 수 있는 후보
+    # 행이 5개(row 0~4) 더 있다.
+    for y in [0, 50, 100, 150, 200, 250, 300, 600, 650, 699]:
+        draw.line([(0, y), (W, y)], fill=0, width=3)
+    for x in (10, 150, 350, 490):
+        draw.line([(x, 0), (x, H)], fill=0, width=3)
+    header_words = [
+        {"text": "품", "left": 160, "top": 260, "height": 30},
+        {"text": "명", "left": 200, "top": 260, "height": 30},
+        {"text": "수", "left": 360, "top": 260, "height": 30},
+        {"text": "량", "left": 400, "top": 260, "height": 30},
+    ]
+
+    call_log = []
+
+    def fake_ocr_cell(pil_image, bbox, numeric=False):
+        call_log.append(bbox)
+        x0, y0, x1, y1 = bbox
+        if (y0, y1) == (250, 300):
+            if x0 == 150:
+                return "품 명"
+            if x0 == 350:
+                return "수 량"
+        return ""
+
+    original_words = pdf_item_parser._ocr_words
+    original_cell = pdf_item_parser._ocr_cell
+    pdf_item_parser._ocr_words = lambda pil_image: header_words
+    pdf_item_parser._ocr_cell = fake_ocr_cell
+    try:
+        table = pdf_item_parser._build_table_from_grid(img, synonyms=None)
+    finally:
+        pdf_item_parser._ocr_words = original_words
+        pdf_item_parser._ocr_cell = original_cell
+
+    assert table is not None
+    assert "품 명" in table[0]
+    assert "수 량" in table[0]
+    # 헤더를 찾으려고 9개 행(x 3열=27칸) 전부를 재OCR했다면 훨씬 컸을 것이다
+    # (실제 헤더가 있는 1개 행만 정밀 검증 + 본문 2행 재구성만 셀 단위로 재OCR).
+    assert len(call_log) <= 15, f"expected far fewer than 27 _ocr_cell calls, got {len(call_log)}"
+    print("OK: test_build_table_from_grid_prefilters_candidate_rows_before_cell_ocr")
+
+
 def test_flag_arithmetic_mismatches_flags_incorrect_printed_supply():
     items = [
         {"name": "정상", "qty": 2.0, "price": 1000.0, "printed_supply": "2,000"},
@@ -965,6 +1020,7 @@ if __name__ == "__main__":
     test_preprocess_for_ocr_returns_grayscale_image_same_size()
     test_ocr_cell_numeric_config_includes_whitelist()
     test_ocr_cell_strips_border_noise_characters()
+    test_build_table_from_grid_prefilters_candidate_rows_before_cell_ocr()
     test_flag_arithmetic_mismatches_flags_incorrect_printed_supply()
     test_flag_arithmetic_mismatches_prefers_weight_over_qty()
     test_flag_arithmetic_mismatches_zero_weight_falls_back_to_qty()
