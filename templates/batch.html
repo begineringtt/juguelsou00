@@ -142,6 +142,8 @@
       <div class="hint">setting_03 폴더에 있는 "연구비 소진 계획.xlsx"(계획 금액)와
         "01. 지출결의서_전체과제_통합(양식).xlsx"(과제 목록) 기준으로, 아직 지출결의서를
         안 만든 (과제,업체)와 계획과 실제 금액이 다른 건을 찾습니다.</div>
+      <label style="margin-top:10px;">연구비 소진 계획 파일 (선택 — 비우면 setting_03의 파일 사용)</label>
+      <input type="file" id="planFileInput" accept=".xlsx">
       <div class="actions" style="margin-top:10px;">
         <button type="button" class="secondary" id="budgetCheckBtn">체크 실행</button>
         <button type="button" class="secondary" id="scaffoldFoldersBtn">빠진 폴더 전부 만들기</button>
@@ -195,13 +197,21 @@ openFolderBtn.addEventListener('click', async () => {
 
 const budgetCheckBtn = document.getElementById('budgetCheckBtn');
 const budgetCheckResult = document.getElementById('budgetCheckResult');
+const planFileInput = document.getElementById('planFileInput');
+
+function budgetFormData(setting03Root) {
+  const fd = new FormData();
+  fd.append('setting03_root', setting03Root);
+  if (planFileInput.files[0]) fd.append('plan_file', planFileInput.files[0]);
+  return fd;
+}
 
 budgetCheckBtn.addEventListener('click', async () => {
   const setting03Root = f.querySelector('input[name="setting03_root"]').value.trim();
   if (!setting03Root) { budgetCheckResult.innerHTML = '<span class="err">setting_03 폴더 경로를 먼저 입력해주세요.</span>'; return; }
   budgetCheckResult.innerHTML = '체크 중입니다…';
   try {
-    const res = await fetch('/budget_check', { method:'POST', body: new URLSearchParams({ setting03_root: setting03Root }) });
+    const res = await fetch('/budget_check', { method:'POST', body: budgetFormData(setting03Root) });
     const d = await res.json();
     if (!res.ok) { budgetCheckResult.innerHTML = '<span class="err">오류: ' + (d.error||'') + '</span>'; return; }
     let html = '';
@@ -244,7 +254,7 @@ scaffoldFoldersBtn.addEventListener('click', async () => {
   if (!setting03Root) { budgetCheckResult.innerHTML = '<span class="err">setting_03 폴더 경로를 먼저 입력해주세요.</span>'; return; }
   budgetCheckResult.innerHTML = '폴더를 만드는 중입니다…';
   try {
-    const res = await fetch('/scaffold_folders', { method:'POST', body: new URLSearchParams({ setting03_root: setting03Root }) });
+    const res = await fetch('/scaffold_folders', { method:'POST', body: budgetFormData(setting03Root) });
     const d = await res.json();
     if (!res.ok) { budgetCheckResult.innerHTML = '<span class="err">오류: ' + (d.error||'') + '</span>'; return; }
     let html = `<b>${d.created.length}개 폴더를 새로 만들었습니다.</b> (이미 있던 폴더 ${d.already_existed.length}개는 건너뜀)\n`;

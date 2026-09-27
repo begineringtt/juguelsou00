@@ -378,8 +378,9 @@ def budget_check_route():
     setting03_root = request.form.get("setting03_root", "").strip()
     if not setting03_root or not os.path.isdir(setting03_root):
         return jsonify({"error": f"setting_03 경로를 찾을 수 없습니다: {setting03_root}"}), 400
+    plan_path = _save_upload(request.files.get("plan_file"))
     try:
-        result = budget_check.check_progress(setting03_root)
+        result = budget_check.check_progress(setting03_root, plan_path=plan_path)
     except FileNotFoundError as e:
         return jsonify({"error": f"필요한 파일을 찾을 수 없습니다: {e}"}), 400
     return jsonify(result)
@@ -390,8 +391,9 @@ def scaffold_folders_route():
     setting03_root = request.form.get("setting03_root", "").strip()
     if not setting03_root or not os.path.isdir(setting03_root):
         return jsonify({"error": f"setting_03 경로를 찾을 수 없습니다: {setting03_root}"}), 400
+    plan_path = _save_upload(request.files.get("plan_file"))
     try:
-        result = budget_check.scaffold_folders(setting03_root)
+        result = budget_check.scaffold_folders(setting03_root, plan_path=plan_path)
     except FileNotFoundError as e:
         return jsonify({"error": f"필요한 파일을 찾을 수 없습니다: {e}"}), 400
     return jsonify(result)

@@ -40,6 +40,11 @@ class BatchRouteTest(unittest.TestCase):
         html = r.get_data(as_text=True)
         self.assertIn('id="scaffoldFoldersBtn"', html)
 
+    def test_batch_page_includes_plan_file_upload_input(self):
+        r = self.client.get("/batch")
+        html = r.get_data(as_text=True)
+        self.assertIn('id="planFileInput"', html)
+
     def test_batch_page_includes_attachment_match_panel(self):
         r = self.client.get("/batch")
         html = r.get_data(as_text=True)
@@ -126,6 +131,39 @@ class BatchRouteTest(unittest.TestCase):
         missing = {(m["project"], m["company"]) for m in j["missing"]}
         self.assertIn(("자동화", "태광테크"), missing)
 
+    def test_budget_check_uses_uploaded_plan_file_instead_of_default_location(self):
+        import openpyxl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "자동화", "태광테크"))
+            master_wb = openpyxl.Workbook()
+            master_wb.active.title = "자동화"
+            master_wb.save(os.path.join(tmp, "01. 지출결의서_전체과제_통합(양식).xlsx"))
+            # setting03_root 에는 기본 위치의 "연구비 소진 계획.xlsx"가 아예 없음 -
+            # 업로드한 파일만 보고 동작해야 한다.
+
+            plan_wb = openpyxl.Workbook()
+            plan_ws = plan_wb.active
+            plan_ws.title = "결제금액 계획"
+            plan_ws["D1"] = "업로드업체"
+            plan_ws["B3"] = "자동화"
+            plan_ws["C3"] = "계획"
+            plan_ws["D3"] = 4500000
+            buf = io.BytesIO()
+            plan_wb.save(buf)
+            buf.seek(0)
+
+            r = self.client.post(
+                "/budget_check",
+                data={"setting03_root": tmp, "plan_file": (buf, "내가 고른 계획.xlsx")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(r.status_code, 200)
+        j = r.get_json()
+        missing = {(m["project"], m["company"], m["planned_amount"]) for m in j["missing"]}
+        self.assertIn(("자동화", "업로드업체", 4500000), missing)
+
     def test_scaffold_folders_rejects_missing_setting03_root(self):
         r = self.client.post("/scaffold_folders", data={"setting03_root": ""})
         self.assertEqual(r.status_code, 400)
@@ -150,6 +188,31 @@ class BatchRouteTest(unittest.TestCase):
         j = r.get_json()
         created = {(c["folder"], c["company"]) for c in j["created"]}
         self.assertIn(("자동화", "태광테크"), created)
+
+    def test_scaffold_folders_uses_uploaded_plan_file_instead_of_default_location(self):
+        import openpyxl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # setting03_root 에는 기본 위치의 "연구비 소진 계획.xlsx"가 없음.
+            plan_wb = openpyxl.Workbook()
+            plan_ws = plan_wb.active
+            plan_ws.title = "결제금액 계획"
+            plan_ws["D1"] = "업로드업체"
+            plan_ws["B3"] = "자동화"
+            plan_ws["C3"] = "계획"
+            plan_ws["D3"] = 4500000
+            buf = io.BytesIO()
+            plan_wb.save(buf)
+            buf.seek(0)
+
+            r = self.client.post(
+                "/scaffold_folders",
+                data={"setting03_root": tmp, "plan_file": (buf, "내가 고른 계획.xlsx")},
+                content_type="multipart/form-data",
+            )
+
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "자동화", "업로드업체")))
 
     def test_parse_quote_route_reports_exact_attachment_match(self):
         import openpyxl
